@@ -105,17 +105,23 @@ func (m ProcessManager) processTarPrefixes() {
 	}
 }
 
+func (m ProcessManager) isFileLocked(path string) bool {
+	err := os.Rename(path, path)
+	return err != nil
+}
+
 // doWork runs in a endless loop. It watches the files in the <CMD arg -src> directory.
 // It terminates as soon as a value is pushed into quit. Run in extra goroutine.
 func (m ProcessManager) doWork(quit chan int) {
 	InfoLogger.Println("Started watch process.")
+	lockedFiles := make(map[string]struct{})
 	for {
 		select {
 		case <-quit:
 			return
 		default:
 			now := time.Now()
-			done_folders := make(map[string]bool)
+			doneFolders := make(map[string]bool)
 			// Checking all files in <CMD arg -src>.
 			err := filepath.Walk(m.args.src,
 				func(path string, info os.FileInfo, err error) error {
@@ -123,20 +129,26 @@ func (m ProcessManager) doWork(quit chan int) {
 						return err
 					}
 					if !info.IsDir() {
-						modifiedtime := info.ModTime()
-						diff := now.Sub(modifiedtime)
-						if diff < 2*m.args.duration {
-							if relpath, err := filepath.Rel(m.args.src, path); err == nil {
-								folder := relpath
+						modified := info.ModTime()
+						diff := now.Sub(modified)
+						if m.isFileLocked(path) {
+							lockedFiles[path] = struct{}{}
+						} else if _, exists := lockedFiles[path]; exists || diff < 2*m.args.duration {
+							if exists {
+								delete(lockedFiles, path)
+							}
+							if relPath, err := filepath.Rel(m.args.src, path); err == nil {
+								folder := relPath
 								if m.args.sendType != "file" && m.args.sendType != "flat_tar" {
-									folder = getRootDir(relpath)
+									folder = getRootDir(relPath)
 								}
 
-								if _, ok := done_folders[folder]; !ok {
-									done_folders[folder] = true
+								if _, ok := doneFolders[folder]; !ok {
+									doneFolders[folder] = true
 								}
+
 								if diff <= m.args.duration {
-									done_folders[folder] = false
+									doneFolders[folder] = false
 								}
 							} else {
 								ErrorLogger.Println(err)
@@ -155,7 +167,7 @@ func (m ProcessManager) doWork(quit chan int) {
 				m.collectTarPrefixes()
 			}
 
-			for k, v := range done_folders {
+			for k, v := range doneFolders {
 				if v {
 					InfoLogger.Println("Folder/File ready to send: ", k)
 					if m.args.sendType == "flat_tar" {
