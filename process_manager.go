@@ -15,26 +15,26 @@ import (
 // not changed for almost exactly <CMD -duration> seconds,
 // the subdirectory will be pushed into the channel 'done_files'.
 type ProcessManager struct {
-	args               *Args
-	done_files         chan string
-	done_flat_prefixes map[string][]string
+	args             *Args
+	doneFiles        chan string
+	doneFlatPrefixes map[string][]string
 }
 
 func (m ProcessManager) applyRegex(name string) ([]string, string) {
 	res := m.args.commonRegex.FindStringSubmatch(name)
 	if res == nil {
-		res = make([]string, 1, 1)
+		res = make([]string, 1)
 		res[0] = name + "_archive"
 	}
 	if len(res) > 1 {
 		res = res[1:]
 	}
-	joined_res := strings.Join(res, "___")
-	if len(joined_res) == 0 || joined_res == name {
-		joined_res = name + "_archive"
+	joinedRes := strings.Join(res, "___")
+	if len(joinedRes) == 0 || joinedRes == name {
+		joinedRes = name + "_archive"
 	}
 
-	return res, joined_res
+	return res, joinedRes
 }
 
 func (m ProcessManager) collectTarPrefixes() {
@@ -42,16 +42,16 @@ func (m ProcessManager) collectTarPrefixes() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	for prefix := range m.done_flat_prefixes {
-		delete(m.done_flat_prefixes, prefix)
+	for prefix := range m.doneFlatPrefixes {
+		delete(m.doneFlatPrefixes, prefix)
 	}
 
 	for _, v := range entries {
 		if v.IsDir() {
 			continue
 		}
-		res, joined_res := m.applyRegex(v.Name())
-		m.done_flat_prefixes[joined_res] = res
+		res, joinedRes := m.applyRegex(v.Name())
+		m.doneFlatPrefixes[joinedRes] = res
 	}
 }
 
@@ -61,8 +61,8 @@ func (m ProcessManager) processTarPrefixes() {
 		log.Fatal(err)
 	}
 
-	for hash_prefix, groups := range m.done_flat_prefixes {
-		dirName := filepath.Join(FlatTarTempPath, hash_prefix)
+	for hashPrefix, groups := range m.doneFlatPrefixes {
+		dirName := filepath.Join(FlatTarTempPath, hashPrefix)
 		err := os.MkdirAll(dirName, os.ModeDir|os.ModePerm)
 		if err != nil {
 			ErrorLogger.Println(err)
@@ -85,23 +85,23 @@ func (m ProcessManager) processTarPrefixes() {
 			}
 		}
 
-		tarPaht, err := tarFolder(dirName)
+		tarPath, err := tarFolder(dirName)
 		if err != nil {
 			ErrorLogger.Println(err)
 		}
 
-		err = Copy(tarPaht, filepath.Join(dirName, filepath.Base(tarPaht)))
+		err = Copy(tarPath, filepath.Join(dirName, filepath.Base(tarPath)))
 		if err != nil {
 			ErrorLogger.Println(err)
 		}
-		m.done_files <- tarPaht
+		m.doneFiles <- tarPath
 		err = os.RemoveAll(dirName)
 		if err != nil {
 			ErrorLogger.Println(err)
 			continue
 		}
 
-		delete(m.done_flat_prefixes, hash_prefix)
+		delete(m.doneFlatPrefixes, hashPrefix)
 	}
 }
 
@@ -110,7 +110,7 @@ func (m ProcessManager) isFileLocked(path string) bool {
 	return err != nil
 }
 
-// doWork runs in a endless loop. It watches the files in the <CMD arg -src> directory.
+// doWork runs in an endless loop. It watches the files in the <CMD arg -src> directory.
 // It terminates as soon as a value is pushed into quit. Run in extra goroutine.
 func (m ProcessManager) doWork(quit chan int) {
 	InfoLogger.Println("Started watch process.")
@@ -178,7 +178,7 @@ func (m ProcessManager) doWork(quit chan int) {
 							ErrorLogger.Println(err)
 						}
 					} else {
-						m.done_files <- filepath.Join(m.args.src, k)
+						m.doneFiles <- filepath.Join(m.args.src, k)
 					}
 				}
 			}
@@ -192,6 +192,6 @@ func (m ProcessManager) doWork(quit chan int) {
 }
 
 // newProcessManager factory for ProcessManager struct
-func newProcessManager(args *Args, done_files chan string) ProcessManager {
-	return ProcessManager{args: args, done_files: done_files, done_flat_prefixes: make(map[string][]string)}
+func newProcessManager(args *Args, doneFiles chan string) ProcessManager {
+	return ProcessManager{args: args, doneFiles: doneFiles, doneFlatPrefixes: make(map[string][]string)}
 }

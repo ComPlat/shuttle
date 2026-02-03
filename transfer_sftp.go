@@ -4,20 +4,22 @@
 package main
 
 import (
-	"github.com/pkg/sftp"
-	"golang.org/x/crypto/ssh"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/pkg/sftp"
+	"golang.org/x/crypto/ssh"
 )
 
 // TransferManagerSftp reacts on the channel done_files.
 // If folder of file is ready to send it sends it via WebDAV (HTTP) to <CMD arg -dst>.
 // It also initializes the zipping if <CMD arg -zip> is set.
 type TransferManagerSftp struct {
-	args   *Args
+	args *Args
+	DestCredentials
 	conn   *ssh.Client
 	client *sftp.Client
 }
@@ -27,12 +29,12 @@ type TransferManagerSftp struct {
 // It also initializes the zipping if <CMD arg -zip> is set
 // It terminates as soon as a value is pushed into quit. Run in extra goroutine.
 func (m *TransferManagerSftp) doWork(quit chan int) {
-	doWorkImplementation(quit, m, m.args)
+	doWorkImplementation(quit, m, m.srcDir, m.args.sendType, m.args.duration)
 }
 
 func (m *TransferManagerSftp) connect_to_server() error {
-	user := m.args.user
-	password := m.args.pass
+	user := m.user
+	password := m.pass
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
@@ -41,7 +43,7 @@ func (m *TransferManagerSftp) connect_to_server() error {
 		HostKeyCallback: ssh.HostKeyCallback(func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }),
 	}
 
-	dst := m.args.dst.Host
+	dst := m.dst.Host
 
 	if m.conn != nil {
 		_ = m.conn.Close()
@@ -83,7 +85,7 @@ func (m *TransferManagerSftp) send_file(path_to_file string, file os.FileInfo) (
 	} else {
 		return false, err
 	}
-	webdavFilePath = filepath.Join(m.args.dst.Path, webdavFilePath)
+	webdavFilePath = filepath.Join(m.dst.Path, webdavFilePath)
 	urlPathDir = filepath.Dir(webdavFilePath)
 	urlPathDir = strings.Replace(urlPathDir, string(os.PathSeparator), "/", -1)
 	webdavFilePath = strings.Replace(webdavFilePath, string(os.PathSeparator), "/", -1)

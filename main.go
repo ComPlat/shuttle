@@ -15,15 +15,16 @@ import (
 )
 
 var (
-	InfoLogger      *log.Logger
-	ErrorLogger     *log.Logger
-	args            Args
-	tr              *http.Transport = nil
-	LogPath         string
-	TempPath        string
-	PreTempPath     string
-	FlatTarTempPath string
-	PreScriptPath   string
+	InfoLogger        *log.Logger
+	ErrorLogger       *log.Logger
+	args              Args
+	tr                *http.Transport = nil
+	LogPath           string
+	TempPath          string
+	TempConvertedPath string
+	PreTempPath       string
+	FlatTarTempPath   string
+	PreScriptPath     string
 )
 
 // init initializes the logger and parses CMD args.
@@ -39,6 +40,7 @@ func initTool() {
 	mainShuttleFolderName := path.Join(wd, "shuttle")
 	shuttleFolderName = path.Join(mainShuttleFolderName, shuttleFolderName)
 	TempPath = path.Join(shuttleFolderName, "shuttle_temp")
+	TempConvertedPath = path.Join(shuttleFolderName, "shuttle_converted_temp")
 	PreTempPath = path.Join(shuttleFolderName, "shuttle_pre_temp")
 	FlatTarTempPath = path.Join(shuttleFolderName, "shuttle_flat_tar_temp")
 	PreScriptPath = path.Join(mainShuttleFolderName, "scripts")
@@ -46,6 +48,9 @@ func initTool() {
 	newPaths := []string{TempPath, PreTempPath, PreScriptPath}
 	if args.sendType == "flat_tar" {
 		newPaths = append(newPaths, FlatTarTempPath)
+	}
+	if args.preconvert {
+		newPaths = append(newPaths, TempConvertedPath)
 	}
 	for _, newPath := range newPaths {
 		if err := os.MkdirAll(newPath, os.ModePerm); err != nil {
@@ -117,12 +122,21 @@ func main() {
 	prm := newPrepareManager(&args, done_files)
 	go prm.doWork(quit)
 
-	tm := newTransferManager(&args)
+	tm := newFileTransferManager(&args)
 	if err := tm.connect_to_server(); err != nil {
 		ErrorLogger.Println("Error connecting: ", err)
 		log.Fatal(err)
 	}
 	go tm.doWork(quit)
+
+	if args.preconvert {
+		tmc := newConvertedTransferManager(&args)
+		if err := tmc.connect_to_server(); err != nil {
+			ErrorLogger.Println("Error connecting: ", err)
+			log.Fatal(err)
+		}
+		go tmc.doWork(quit)
+	}
 
 	for {
 		time.Sleep(args.duration * 20)

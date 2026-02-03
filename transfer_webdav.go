@@ -3,19 +3,21 @@ package main
 import (
 	"errors"
 	"fmt"
-	"github.com/StarmanMartin/gowebdav"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/StarmanMartin/gowebdav"
 )
 
 // TransferManagerWebdav reacts on the channel done_files.
 // If folder of file is ready to send it sends it via WebDAV (HTTP) to <CMD arg -dst>.
 // It also initializes the zipping if <CMD arg -zip> is set.
 type TransferManagerWebdav struct {
-	args   *Args
+	args *Args
+	DestCredentials
 	client *gowebdav.Client
 }
 
@@ -24,14 +26,14 @@ type TransferManagerWebdav struct {
 // It also initializes the zipping if <CMD arg -zip> is set
 // It terminates as soon as a value is pushed into quit. Run in extra goroutine.
 func (m *TransferManagerWebdav) doWork(quit chan int) {
-	doWorkImplementation(quit, m, m.args)
+	doWorkImplementation(quit, m, m.srcDir, m.args.sendType, m.args.duration)
 }
 
 func (m *TransferManagerWebdav) connect_to_server() error {
-	user := m.args.user
-	password := m.args.pass
+	user := m.user
+	password := m.pass
 
-	c := gowebdav.NewClient(m.args.dst.String(), user, password, tr)
+	c := gowebdav.NewClient(m.dst.String(), user, password, tr)
 	c.SetTimeout(10 * time.Second)
 	if err := c.Connect(); err != nil {
 		return err

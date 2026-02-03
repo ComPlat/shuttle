@@ -2,10 +2,16 @@ package main
 
 import (
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
 )
+
+type DestCredentials struct {
+	user, srcDir, pass string
+	dst                url.URL
+}
 
 // TransferManager reacts on the channel done_files.
 // If folder of file is ready to send it sends it via WebDAV (HTTP) to <CMD arg -dst>.
@@ -23,21 +29,21 @@ type TransferManager interface {
 	send_file(path_to_file string, file os.FileInfo) (bool, error)
 }
 
-func doWorkImplementation(quit chan int, m TransferManager, args *Args) {
+func doWorkImplementation(quit chan int, m TransferManager, srcDir string, sendType string, duration time.Duration) {
 	for {
 		select {
 		case <-quit:
 			return
 		default:
-			items, _ := ioutil.ReadDir(TempPath)
+			items, _ := ioutil.ReadDir(srcDir)
 			for _, file := range items {
 				var gErr error = nil
 				var ok bool
-				to_send := filepath.Join(TempPath, file.Name())
+				to_send := filepath.Join(srcDir, file.Name())
 
 				if !file.IsDir() {
 					ok, gErr = m.send_file(to_send, file)
-				} else if args.sendType == "zip" {
+				} else if sendType == "zip" {
 					zip_paht, err := zipFolder(to_send)
 					gErr = err
 					if err == nil {
@@ -48,7 +54,7 @@ func doWorkImplementation(quit chan int, m TransferManager, args *Args) {
 						}
 					}
 
-				} else if args.sendType == "tar" {
+				} else if sendType == "tar" {
 					zip_paht, err := tarFolder(to_send)
 					gErr = err
 					if err == nil {
@@ -87,17 +93,39 @@ func doWorkImplementation(quit chan int, m TransferManager, args *Args) {
 				} else if gErr != nil {
 					ErrorLogger.Println(gErr)
 				}
-				time.Sleep(args.duration / 2)
+				time.Sleep(duration / 2)
 			}
 		}
 	}
 }
 
-func newTransferManager(args *Args) TransferManager {
+func newFileTransferManager(args *Args) TransferManager {
+	dest := DestCredentials{
+		user:   args.user,
+		pass:   args.pass,
+		dst:    args.dst,
+		srcDir: TempPath,
+	}
+
+	return newTransferManager(args, &dest)
+}
+
+func newConvertedTransferManager(args *Args) TransferManager {
+	dest := DestCredentials{
+		user:   args.userConverter,
+		pass:   args.passConverter,
+		dst:    args.dstConverter,
+		srcDir: TempConvertedPath,
+	}
+
+	return newTransferManager(args, &dest)
+}
+
+func newTransferManager(args *Args, dest *DestCredentials) TransferManager {
 	if args.tType == "webdav" {
-		return &TransferManagerWebdav{args: args}
+		return &TransferManagerWebdav{DestCredentials: *dest, args: args}
 	} else if args.tType == "sftp" {
-		return &TransferManagerSftp{args: args}
+		return &TransferManagerSftp{DestCredentials: *dest, args: args}
 	}
 
 	panic("Transfer type is not implemented")

@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"path"
+	"path/filepath"
 )
 
 // TransferManager reacts on the channel done_files.
@@ -44,6 +46,19 @@ func (m *PrepareManager) doWork(quit chan int) {
 			}
 
 			RunPreScripts(tempPath)
+			if args.preconvert {
+				RunConverterScripts(tempPath)
+				filePath := tempPath + ".zip"
+				fileName := filepath.Base(filePath)
+				err := AddLinkToZip(filepath.Base(filePath), filePath)
+				if err != nil {
+					ErrorLogger.Println(err)
+				}
+				err = os.Rename(filePath, path.Join(TempConvertedPath, fileName))
+				if err != nil {
+					ErrorLogger.Println(err)
+				}
+			}
 			err = CopyTempDirectory()
 			if err != nil {
 				log.Fatal(err)

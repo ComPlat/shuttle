@@ -45,6 +45,7 @@ func winscp(cmd ...string) error {
 // It also initializes the zipping if <CMD arg -zip> is set.
 type TransferManagerSftp struct {
 	args *Args
+	DestCredentials
 }
 
 // doWork runs in a endless loop. It reacts on the channel done_files.
@@ -52,14 +53,14 @@ type TransferManagerSftp struct {
 // It also initializes the zipping if <CMD arg -zip> is set
 // It terminates as soon as a value is pushed into quit. Run in extra goroutine.
 func (m *TransferManagerSftp) doWork(quit chan int) {
-	doWorkImplementation(quit, m, m.args)
+	doWorkImplementation(quit, m, m.srcDir, m.args.sendType, m.args.duration)
 }
 
 func (m *TransferManagerSftp) connect_to_server() error {
 	//user := m.args.user
 	//password := m.args.pass
 
-	sftpConnStr := fmt.Sprintf("sftp://%s:%s@%s/", m.args.user, m.args.pass, m.args.dst.Host)
+	sftpConnStr := fmt.Sprintf("sftp://%s:%s@%s/", m.user, m.pass, m.dst.Host)
 
 	//return winscp("sftp://martin:Kokoa10!@192.168.56.108:22/home/martin/data_sft_test")
 	return winscp(sftpConnStr)
@@ -77,18 +78,18 @@ func (m *TransferManagerSftp) send_file(path_to_file string, file os.FileInfo) (
 	} else {
 		return false, err
 	}
-	webdavFilePath = filepath.Join(m.args.dst.Path, webdavFilePath)
+	webdavFilePath = filepath.Join(m.dst.Path, webdavFilePath)
 	urlPathDir = filepath.Dir(webdavFilePath)
 	InfoLogger.Println("Sending...", webdavFilePath)
 
-	sftpConnStr := fmt.Sprintf("sftp://%s:%s@%s/", m.args.user, m.args.pass, m.args.dst.Host)
-	if relpath, err := filepath.Rel(m.args.dst.Path, urlPathDir); err == nil {
+	sftpConnStr := fmt.Sprintf("sftp://%s:%s@%s/", m.user, m.pass, m.dst.Host)
+	if relpath, err := filepath.Rel(m.dst.Path, urlPathDir); err == nil {
 		urlPathDir = strings.Replace(relpath, string(os.PathSeparator), "/", -1)
 	} else {
 		return false, err
 	}
 
-	cwp := m.args.dst.Path
+	cwp := m.dst.Path
 	webdavFilePath = strings.Replace(webdavFilePath, string(os.PathSeparator), "/", -1)
 	for _, s := range strings.Split(urlPathDir, "/") {
 		cwp := cwp + "/" + s

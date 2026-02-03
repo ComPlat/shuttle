@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -29,34 +31,71 @@ func getRootDir(path string) string {
 	}
 }
 
-func RunPreScripts(filePath string) {
+func RunPreScripts(srcFilePath string) {
 	entries, err := ioutil.ReadDir(PreScriptPath)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	for _, file := range entries {
-		if !file.IsDir() && strings.Contains(".exe.sh.fish", filepath.Ext(file.Name())) {
-			var (
-				cmd *exec.Cmd
-			)
-			if runtime.GOOS == "windows" {
-				absScriptPath := filepath.Join(PreScriptPath, file.Name())
-				cmd = exec.Command(absScriptPath, filePath)
-			} else {
-				cmd = exec.Command("./"+file.Name(), filePath)
-			}
+		runScript(file, PreScriptPath, srcFilePath)
+	}
+}
 
-			cmd.Dir = PreScriptPath
-			var outb, errb bytes.Buffer
-			cmd.Stdout = &outb
-			cmd.Stderr = &errb
-			err := cmd.Run()
-			if err != nil {
-				ErrorLogger.Println(err.Error())
-			}
-			InfoLogger.Println(file.Name(), "\n |-> out:", outb.String(), "\n |-> err:", errb.String())
+func exeDir() (string, error) {
+
+	// DEV override
+	if dir := os.Getenv("APP_BASE_DIR"); dir != "" {
+		return dir, nil
+	}
+
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Dir(exe), nil
+}
+
+func RunConverterScripts(srcFilePath string) {
+	entries, err := exeDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	file := ""
+	if runtime.GOOS == "windows" {
+		file = filepath.Join(entries, "ChemConverterApp.exe")
+	} else {
+		file = filepath.Join(entries, "ChemConverterApp")
+	}
+	fileInfo, err := os.Stat(file)
+	if err != nil {
+		log.Fatal("Error Converter executable dose not exists:\n |->", file, "\n", err)
+	}
+	runScript(fileInfo, entries, "convert", "-i", srcFilePath, "-o", "jcampzip")
+
+}
+
+func runScript(file fs.FileInfo, cwd string, args ...string) {
+	if !file.IsDir() && strings.Contains(".exe.sh.fish", filepath.Ext(file.Name())) {
+		var (
+			cmd *exec.Cmd
+		)
+		if runtime.GOOS == "windows" {
+			absScriptPath := filepath.Join(cwd, file.Name())
+			cmd = exec.Command(absScriptPath, args...)
+		} else {
+			cmd = exec.Command("./"+file.Name(), args...)
 		}
+
+		cmd.Dir = cwd
+		var outb, errb bytes.Buffer
+		cmd.Stdout = &outb
+		cmd.Stderr = &errb
+		err := cmd.Run()
+		if err != nil {
+			ErrorLogger.Println(err.Error())
+		}
+		InfoLogger.Println(file.Name(), "\n |-> out:", outb.String(), "\n |-> err:", errb.String())
 	}
 }
 
@@ -297,4 +336,137 @@ func tarFolder(path_src string) (string, error) {
 		return "", err
 	}
 	return output_path, nil
+}
+
+func AddLinkToZip(file, zipPath string) error {
+	// 1️⃣ create temp file
+	tmp, err := os.CreateTemp("", "link.txt")
+	if err != nil {
+		return err
+	}
+
+	// always clean up
+	defer func(tmp *os.File) {
+		err := tmp.Close()
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+	}(tmp)
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+	}(tmp.Name())
+
+	// write content
+	if _, err := tmp.WriteString(args.public + path.Base(file)); err != nil {
+		return err
+	}
+
+	return AddFileToZip(zipPath, tmp.Name(), ".link")
+}
+
+func AddFileToZip(zipPath, filePath, fileName string) error {
+	// Open existing zip
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer func(r *zip.ReadCloser) {
+		err := r.Close()
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+	}(r)
+
+	// Create temp zip
+	tmpFile, err := os.CreateTemp("", "ziptmp-*.zip")
+	if err != nil {
+		return err
+	}
+	defer func(name string) {
+		err := os.Remove(name)
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+	}(tmpFile.Name())
+
+	w := zip.NewWriter(tmpFile)
+
+	// Copy existing files
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			return err
+		}
+
+		hdr := f.FileHeader
+		hdr.Method = zip.Deflate
+
+		dst, err := w.CreateHeader(&hdr)
+		if err != nil {
+			errRc := rc.Close()
+			if errRc != nil {
+				ErrorLogger.Println(errRc)
+			}
+			return err
+		}
+
+		if _, err = io.Copy(dst, rc); err != nil {
+			errRc := rc.Close()
+			if errRc != nil {
+				ErrorLogger.Println(errRc)
+			}
+			return err
+		}
+		errRc := rc.Close()
+		if errRc != nil {
+			return err
+		}
+	}
+
+	// Add new file
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer func(file *os.File) {
+		err := file.Close()
+		if err != nil {
+
+		}
+	}(file)
+
+	info, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	hdr, err := zip.FileInfoHeader(info)
+	if err != nil {
+		return err
+	}
+	hdr.Name = fileName
+
+	dst, err := w.CreateHeader(hdr)
+	if err != nil {
+		return err
+	}
+
+	if _, err := io.Copy(dst, file); err != nil {
+		return err
+	}
+
+	// Close zip writer
+	if err := w.Close(); err != nil {
+		return err
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return err
+	}
+
+	// Replace original zip
+	return os.Rename(tmpFile.Name(), zipPath)
 }
