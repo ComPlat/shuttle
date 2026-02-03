@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -35,7 +34,7 @@ func doWorkImplementation(quit chan int, m TransferManager, srcDir string, sendT
 		case <-quit:
 			return
 		default:
-			items, _ := ioutil.ReadDir(srcDir)
+			items, _ := ReadDirCompat(srcDir)
 			for _, file := range items {
 				var gErr error = nil
 				var ok bool

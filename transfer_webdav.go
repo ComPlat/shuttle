@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -69,7 +68,7 @@ func (m *TransferManagerWebdav) send_file(path_to_file string, file os.FileInfo)
 		}
 	}
 
-	bytes, err := ioutil.ReadFile(path_to_file)
+	bytes, err := ReadFileCompat(path_to_file)
 	if err != nil {
 		return false, err
 	}

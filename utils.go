@@ -7,7 +7,6 @@ import (
 	"compress/gzip"
 	"io"
 	"io/fs"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -32,7 +31,7 @@ func getRootDir(path string) string {
 }
 
 func RunPreScripts(srcFilePath string) {
-	entries, err := ioutil.ReadDir(PreScriptPath)
+	entries, err := ReadDirCompat(PreScriptPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -119,7 +118,7 @@ func CopyPreTempDirectory(scrDir string) (string, error) {
 }
 
 func CopyTempDirectory() error {
-	entries, err := ioutil.ReadDir(PreTempPath)
+	entries, err := ReadDirCompat(PreTempPath)
 	if err != nil {
 		return err
 	}
@@ -217,7 +216,7 @@ func zipFolder(path_src string) (string, error) {
 				return err
 			}
 
-			dat, err := ioutil.ReadFile(path)
+			dat, err := ReadFileCompat(path)
 			if err != nil {
 				return err
 			}
@@ -388,11 +387,16 @@ func AddFileToZip(zipPath, filePath, fileName string) error {
 	defer func(name string) {
 		err := os.Remove(name)
 		if err != nil {
-			ErrorLogger.Println(err)
 		}
 	}(tmpFile.Name())
 
 	w := zip.NewWriter(tmpFile)
+
+	defer func(w *zip.Writer) {
+		err := w.Close()
+		if err != nil {
+		}
+	}(w)
 
 	// Copy existing files
 	for _, f := range r.File {

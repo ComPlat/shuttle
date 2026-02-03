@@ -1,7 +1,6 @@
 package main
 
 import (
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func (m ProcessManager) applyRegex(name string) ([]string, string) {
 }
 
 func (m ProcessManager) collectTarPrefixes() {
-	entries, err := ioutil.ReadDir(FlatTarTempPath)
+	entries, err := ReadDirCompat(FlatTarTempPath)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -56,7 +55,7 @@ func (m ProcessManager) collectTarPrefixes() {
 }
 
 func (m ProcessManager) processTarPrefixes() {
-	entries, err := ioutil.ReadDir(FlatTarTempPath)
+	entries, err := ReadDirCompat(FlatTarTempPath)
 	if err != nil {
 		log.Fatal(err)
 	}

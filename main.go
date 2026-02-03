@@ -5,7 +5,6 @@ import (
 	"crypto/x509"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
@@ -82,7 +81,7 @@ func initArgs() {
 		rootCAs = x509.NewCertPool()
 	}
 	if isCert {
-		certs, err := ioutil.ReadFile(args.crt)
+		certs, err := ReadFileCompat(args.crt)
 		if err == nil {
 			if ok := rootCAs.AppendCertsFromPEM(certs); !ok {
 				ErrorLogger.Println("No certs appended, using system certs only")
