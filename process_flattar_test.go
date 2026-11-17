@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"testing"
 )
 
@@ -78,19 +79,23 @@ func TestFlatTarPrefixes(t *testing.T) {
 	}
 }
 
-func TestProcessTarPrefixesSpecialGroupNames(t *testing.T) {
+// runSpecialGroupName sends one file whose regex groups are not a valid
+// folder name through processTarPrefixes and checks the sanitised result.
+func runSpecialGroupName(t *testing.T, fileName, regex, key string, groups []string, wantTar string) {
+	t.Helper()
 	_, restore := useTempGlobals(t)
 	defer restore()
 
-	// The group "x:y/z" is not a valid folder name on Windows.
-	writeTestFile(t, filepath.Join(FlatTarTempPath, "x:y_z__1.txt"), "one")
+	writeTestFile(t, filepath.Join(FlatTarTempPath, fileName), "one")
 	writeTestFile(t, filepath.Join(FlatTarTempPath, "keep.txt"), "later")
 
 	doneFiles := make(chan string, 10)
-	a := &Args{commonRegex: regexp.MustCompile(`^x(:y)_(z)__`), sendType: "flat_tar"}
+	a := &Args{commonRegex: regexp.MustCompile(regex), sendType: "flat_tar"}
 	pm := newProcessManager(a, doneFiles)
-	// Simulate a group name containing separators and a colon.
-	pm.doneFlatPrefixes = map[string][]string{"x:y/z": {":y", "z"}}
+	if res, _ := pm.applyRegex(fileName); !AreEqual(res, groups) {
+		t.Fatalf("fixture: applyRegex(%q) = %q, want %q", fileName, res, groups)
+	}
+	pm.doneFlatPrefixes = map[string][]string{key: groups}
 
 	pm.processTarPrefixes()
 	close(doneFiles)
@@ -104,11 +109,11 @@ func TestProcessTarPrefixesSpecialGroupNames(t *testing.T) {
 	if filepath.Dir(tars[0]) != FlatTarOutPath {
 		t.Errorf("tar %s not inside FlatTarOutPath", tars[0])
 	}
-	if filepath.Base(tars[0]) != "x_y_z.tar.gz" {
-		t.Errorf("tar name = %s, want x_y_z.tar.gz", filepath.Base(tars[0]))
+	if filepath.Base(tars[0]) != wantTar {
+		t.Errorf("tar name = %s, want %s", filepath.Base(tars[0]), wantTar)
 	}
 	got := readTarGzEntries(t, tars[0])
-	if len(got) != 1 || got["x:y_z__1.txt"] != "one" {
+	if len(got) != 1 || got[fileName] != "one" {
 		t.Errorf("tar entries = %v", got)
 	}
 	// Only the file of the group not processed is left in FlatTarTempPath.
@@ -119,6 +124,21 @@ func TestProcessTarPrefixesSpecialGroupNames(t *testing.T) {
 	if len(left) != 1 || left[0].Name() != "keep.txt" {
 		t.Errorf("FlatTarTempPath should only hold keep.txt, got %v", left)
 	}
+}
+
+// A group ending in "." is a valid file-name part on every OS, but Windows
+// silently strips trailing dots from folder names.
+func TestProcessTarPrefixesTrailingDotGroup(t *testing.T) {
+	runSpecialGroupName(t, "abc.1.txt", `^(\w+\.)`, "abc.", []string{"abc."}, "abc.tar.gz")
+}
+
+// Groups with ":" or "/" can only come from file names on non-Windows
+// systems (on Windows ":" in a file name creates an NTFS data stream).
+func TestProcessTarPrefixesSpecialGroupNames(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("file names with ':' cannot exist on Windows; covered by TestProcessTarPrefixesTrailingDotGroup")
+	}
+	runSpecialGroupName(t, "x:y_z__1.txt", `^x(:y)_(z)__`, "x:y/z", []string{":y", "z"}, "x_y_z.tar.gz")
 }
 
 func TestProcessTarPrefixesTarFailureKeepsSources(t *testing.T) {
