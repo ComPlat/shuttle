@@ -1,3 +1,7 @@
+// Build tag note: this file is tagged go1.11, not go1.16, on purpose. The XP
+// toolchain is Go 1.10 in GOPATH mode, without golang.org/x/crypto; every
+// toolchain >= 1.11 that ShuttleBuilder uses builds with modules.
+
 //go:build go1.11
 // +build go1.11
 
