@@ -63,8 +63,10 @@ Transfer Protocol (-transfer):
 
 Shuttle supports preprocess scripts, which allow you to execute custom scripts before transferring files.
 
-- Windows: Scripts must be .exe files.
-- Linux: All executable file types are supported.
+- Windows: only regular files with the extension `.exe` (any case) are run; `.bat`, `.cmd` and `.sh` are not.
+- Linux: every regular file with an execute bit is run, whatever its extension. A symlink to such a file is run too.
+- Directories and hidden files (names starting with `.`) are never run.
+- The converter `ChemConverterApp` (`ChemConverterApp.exe` on Windows) must be next to the `shuttle` executable.
 
 #### Preprocess Script Requirements:
 The script files must be located in the directory:
