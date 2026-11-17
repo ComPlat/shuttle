@@ -1,0 +1,68 @@
+name: build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  modern:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "gofmt needed for:"
+            echo "$unformatted"
+            exit 1
+          fi
+      - name: go vet
+        run: go vet ./...
+      - name: cross-build
+        run: |
+          set -e
+          build() {
+            echo "== $1/$2 ${3:+GOARM=$3}"
+            GOOS="$1" GOARCH="$2" GOARM="$3" go build -o /dev/null .
+          }
+          build linux amd64
+          build linux arm 6
+          build linux arm 7
+          build linux arm64
+          build windows amd64
+          build windows 386
+
+  xp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Windows XP build (Go 1.10.8)
+        run: bash dev/build_xp.sh
+
+  templates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install django
+      - run: python dev/check_templates.py
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    continue-on-error: true  # remove in WP 2.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go test ./...
