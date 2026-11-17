@@ -61,12 +61,13 @@ func (m ProcessManager) processTarPrefixes() {
 	}
 
 	for hashPrefix, groups := range m.doneFlatPrefixes {
-		dirName := filepath.Join(FlatTarTempPath, hashPrefix)
+		dirName := filepath.Join(FlatTarTempPath, safeDirName(hashPrefix))
 		err := os.MkdirAll(dirName, os.ModeDir|os.ModePerm)
 		if err != nil {
 			ErrorLogger.Println(err)
 			continue
 		}
+		var moved []string
 		for _, v := range entries {
 			if v.IsDir() {
 				continue
@@ -76,29 +77,52 @@ func (m ProcessManager) processTarPrefixes() {
 
 			if AreEqual(res, groups) {
 				sourcePath := filepath.Join(FlatTarTempPath, v.Name())
-				err := Copy(sourcePath, filepath.Join(dirName, v.Name()))
-				if err != nil {
+				dstPath := filepath.Join(dirName, v.Name())
+				if err := Copy(sourcePath, dstPath); err != nil {
 					ErrorLogger.Println(err)
+					continue
 				}
-				err = os.Remove(sourcePath)
+				if err := os.Remove(sourcePath); err != nil {
+					// Keep the file where it is; do not archive it twice.
+					ErrorLogger.Println(err)
+					_ = os.Remove(dstPath)
+					continue
+				}
+				moved = append(moved, v.Name())
 			}
+		}
+
+		if len(moved) == 0 {
+			_ = os.Remove(dirName)
+			continue
 		}
 
 		tarPath, err := tarFolder(dirName)
 		if err != nil {
 			ErrorLogger.Println(err)
-		}
-
-		err = Copy(tarPath, filepath.Join(dirName, filepath.Base(tarPath)))
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-		m.doneFiles <- tarPath
-		err = os.RemoveAll(dirName)
-		if err != nil {
-			ErrorLogger.Println(err)
+			// Nothing is sent. Move the sources back so the next cycle retries.
+			for _, name := range moved {
+				back := filepath.Join(FlatTarTempPath, name)
+				if err := os.Rename(filepath.Join(dirName, name), back); err != nil {
+					ErrorLogger.Println(err)
+				}
+			}
+			_ = os.Remove(dirName)
 			continue
 		}
+
+		if err := os.RemoveAll(dirName); err != nil {
+			ErrorLogger.Println(err)
+		}
+		// Finished archives live outside FlatTarTempPath, so they are never archived again.
+		outPath := filepath.Join(FlatTarOutPath, uniqueName(FlatTarOutPath, filepath.Base(tarPath)))
+		if err := os.Rename(tarPath, outPath); err != nil {
+			// Keep the tar for inspection and send nothing.
+			ErrorLogger.Println(err)
+			delete(m.doneFlatPrefixes, hashPrefix)
+			continue
+		}
+		m.doneFiles <- outPath
 
 		delete(m.doneFlatPrefixes, hashPrefix)
 	}
@@ -110,6 +134,8 @@ var fileLockedFn = func(path string) bool {
 	return os.Rename(path, path) != nil
 }
 
+// isFileLocked only has an effect on Windows: renaming a file onto itself
+// fails there while another process holds it open, but succeeds on Linux.
 func (m ProcessManager) isFileLocked(path string) bool {
 	return fileLockedFn(path)
 }
@@ -129,6 +155,14 @@ func (m ProcessManager) scanReady(now time.Time, lockedFiles map[string]struct{}
 				diff := now.Sub(modified)
 				if m.isFileLocked(path) {
 					lockedFiles[path] = struct{}{}
+					// A locked file holds back its whole root folder.
+					if m.args.sendType != "file" && m.args.sendType != "flat_tar" {
+						if relPath, err := filepath.Rel(m.args.src, path); err == nil {
+							doneFolders[getRootDir(relPath)] = false
+						} else {
+							ErrorLogger.Println(err)
+						}
+					}
 				} else if _, exists := lockedFiles[path]; exists || diff < 2*m.args.duration {
 					if exists {
 						delete(lockedFiles, path)
@@ -183,7 +217,8 @@ func (m ProcessManager) doWork(quit chan int) {
 					InfoLogger.Println("Folder/File ready to send: ", k)
 					if m.args.sendType == "flat_tar" {
 						src := filepath.Join(m.args.src, k)
-						dst := filepath.Join(FlatTarTempPath, filepath.Base(k))
+						base := filepath.Base(k)
+						dst := filepath.Join(FlatTarTempPath, uniqueName(FlatTarTempPath, base))
 						err := Copy(src, dst)
 						if err != nil {
 							ErrorLogger.Println(err)
