@@ -223,9 +223,30 @@ func TestIsRunnableScriptSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	if isRunnableScript(info) {
-		t.Error("a symlink entry is not a regular file and must not run")
+		t.Error("an unresolved symlink entry is not a regular file and must not run")
 	}
 	if isRunnableScript(nil) {
 		t.Error("nil info must not run")
+	}
+
+	// RunPreScripts resolves links first: a link to an executable runs, and
+	// keeps the link's name; a dangling link is skipped.
+	resolved, ok := resolveScriptEntry(root, info)
+	if !ok || !isRunnableScript(resolved) {
+		t.Errorf("a link to an executable must be runnable after resolving (ok=%v)", ok)
+	}
+	if ok && resolved.Name() != "l.sh" {
+		t.Errorf("resolved name = %q, want the link name l.sh", resolved.Name())
+	}
+	dangling := filepath.Join(root, "dangling.sh")
+	if err := os.Symlink(filepath.Join(root, "missing"), dangling); err != nil {
+		t.Fatal(err)
+	}
+	dinfo, err := os.Lstat(dangling)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resolveScriptEntry(root, dinfo); ok {
+		t.Error("a dangling link must be skipped")
 	}
 }

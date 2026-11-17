@@ -39,8 +39,25 @@ func RunPreScripts(srcFilePath string) {
 	}
 
 	for _, file := range entries {
-		runScript(file, PreScriptPath, srcFilePath)
+		if info, ok := resolveScriptEntry(PreScriptPath, file); ok {
+			runScript(info, PreScriptPath, srcFilePath)
+		}
 	}
+}
+
+// resolveScriptEntry follows a symlink in the scripts folder to its target,
+// so an admin can link an executable into the folder. The returned info keeps
+// the link's name. A dangling link is skipped.
+func resolveScriptEntry(dir string, info os.FileInfo) (os.FileInfo, bool) {
+	if info.Mode()&os.ModeSymlink == 0 {
+		return info, true
+	}
+	target, err := os.Stat(filepath.Join(dir, info.Name()))
+	if err != nil {
+		ErrorLogger.Println("skipping script link", info.Name(), ":", err)
+		return nil, false
+	}
+	return target, true
 }
 
 func exeDir() (string, error) {
