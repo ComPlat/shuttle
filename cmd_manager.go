@@ -21,6 +21,9 @@ type Args struct {
 	dstConverter                         url.URL
 	userConverter, public, passConverter string
 	preconvert                           bool
+	// hostKey is the expected SSH host key fingerprint of the SFTP server
+	// (-hostkey); empty means "not configured".
+	hostKey string
 }
 
 func (m Args) LogString() string {
@@ -44,6 +47,7 @@ func GetCmdArgs() Args {
 	var preconvert bool
 	var duration int
 	var commonRegexStr string
+	var hostKey string
 	var commonRegex *regexp.Regexp
 	var sendType string
 	var err error
@@ -67,6 +71,8 @@ func GetCmdArgs() Args {
 
 	flag.StringVar(&preconvertString, "preconvert", "{{ preconvert }}", "[True or 1] to pre-convert the file and store raw at destination.")
 	flag.StringVar(&public, "public", "{{ public }}", "The prefix of the publicly accessible link to the raw files. It should end with an /. Only the file name is added to this prefix.")
+
+	flag.StringVar(&hostKey, "hostkey", "{{ hostkey }}", "SFTP only: expected SSH host key fingerprint of the server, e.g. 'ssh-ed25519 255 SHA256:...' (WinSCP format) or 'SHA256:...'.")
 
 	flag.Parse()
 
@@ -134,6 +140,19 @@ func GetCmdArgs() Args {
 	return Args{src: fp, dst: *u, user: user, pass: pass, crt: crt,
 		duration: time.Duration(duration) * time.Second, sendType: sendType, tType: tType, name: name, commonRegex: commonRegex, preconvert: preconvert,
 		dstConverter: *dstConverterUrl, public: public,
-		userConverter: userConverter, passConverter: passConverter}
+		userConverter: userConverter, passConverter: passConverter,
+		hostKey: unsetPlaceholder(hostKey)}
 
+}
+
+// unsetPlaceholder returns "" for a value that is still an unrendered
+// ShuttleBuilder placeholder (a binary built without ShuttleBuilder keeps the
+// flag defaults literally). The delimiters are concatenated so that
+// ShuttleBuilder's template pass does not touch this code.
+func unsetPlaceholder(v string) string {
+	t := strings.TrimSpace(v)
+	if strings.HasPrefix(t, "{"+"{") && strings.HasSuffix(t, "}"+"}") {
+		return ""
+	}
+	return v
 }
