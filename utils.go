@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/exec"
@@ -14,6 +15,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // getRootDir returns the root directory, i.e., the first directory in the path.
@@ -75,7 +77,7 @@ func RunConverterScripts(srcFilePath string) {
 }
 
 func runScript(file os.FileInfo, cwd string, args ...string) {
-	if !file.IsDir() && strings.Contains(".exe.sh.fish", filepath.Ext(file.Name())) {
+	if isRunnableScript(file) {
 		var (
 			cmd *exec.Cmd
 		)
@@ -248,7 +250,7 @@ func zipFolder(path_src string) (string, error) {
 				return err
 			}
 
-			f, err := w.Create(rel_path)
+			f, err := w.Create(filepath.ToSlash(rel_path))
 			if err != nil {
 				return err
 			}
@@ -322,7 +324,7 @@ func tarFolder(path_src string) (string, error) {
 			// If we don't do this the directory strucuture would
 			// not be preserved
 			// https://golang.org/src/archive/tar/common.go?#L626
-			header.Name = rel_path
+			header.Name = filepath.ToSlash(rel_path)
 
 			err = tw.WriteHeader(header)
 			if err == nil {
@@ -393,140 +395,128 @@ func uniqueName(dir, base string) string {
 	}
 }
 
+// AddLinkToZip adds the entry ".link" (public URL + base name of file) to the
+// zip. No temp file is involved.
 func AddLinkToZip(file, zipPath string) error {
-	// 1️⃣ create temp file
-	tmp, err := CreateTempCompat("", "link-")
+	return AddBytesToZip(zipPath, ".link", []byte(args.public+path.Base(file)))
+}
+
+// AddFileToZip adds the file filePath as entry fileName to the zip.
+func AddFileToZip(zipPath, filePath, fileName string) error {
+	data, err := ioutil.ReadFile(filePath)
 	if err != nil {
 		return err
 	}
-
-	// always clean up
-	defer func(tmp *os.File) {
-		err := tmp.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(tmp)
-	defer func(name string) {
-		err := os.Remove(name)
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(tmp.Name())
-
-	// write content
-	if _, err := tmp.WriteString(args.public + path.Base(file)); err != nil {
-		return err
-	}
-
-	return AddFileToZip(zipPath, tmp.Name(), ".link")
+	return AddBytesToZip(zipPath, fileName, data)
 }
 
-func AddFileToZip(zipPath, filePath, fileName string) error {
-	// Open existing zip
+// AddBytesToZip rewrites the zip at zipPath with all its entries plus a new
+// entry name holding data. The new zip is built in the folder of zipPath (same
+// volume, so no cross-device rename) and everything is closed before it
+// replaces the original. On any error the temp file is removed and the
+// original zip stays intact.
+func AddBytesToZip(zipPath, name string, data []byte) error {
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
 	}
-	defer func(r *zip.ReadCloser) {
-		err := r.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(r)
-
-	// Create temp zip
-	tmpFile, err := CreateTempCompat("", "ziptmp-")
+	tmpFile, err := CreateTempCompat(filepath.Dir(zipPath), "ziptmp-")
 	if err != nil {
+		_ = r.Close()
 		return err
 	}
-	defer func(name string) {
-		err := os.Remove(name)
-		if err != nil {
-		}
-	}(tmpFile.Name())
-
+	tmpName := tmpFile.Name()
 	w := zip.NewWriter(tmpFile)
 
-	defer func(w *zip.Writer) {
-		err := w.Close()
-		if err != nil {
+	err = copyZipEntries(w, r)
+	if err == nil {
+		var dst io.Writer
+		hdr := &zip.FileHeader{Name: name, Method: zip.Deflate}
+		hdr.SetModTime(time.Now())
+		if dst, err = w.CreateHeader(hdr); err == nil {
+			_, err = dst.Write(data)
 		}
-	}(w)
+	}
 
-	// Copy existing files
+	// Close in order (reader, zip writer, file) and keep the first error.
+	// All of this must happen before the rename: Windows cannot rename over
+	// or remove an open file.
+	if cerr := r.Close(); err == nil {
+		err = cerr
+	}
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	if cerr := tmpFile.Close(); err == nil {
+		err = cerr
+	}
+	if err == nil {
+		err = replaceFile(tmpName, zipPath)
+	}
+	if err != nil {
+		_ = os.Remove(tmpName)
+		return err
+	}
+	return nil
+}
+
+// copyZipEntries copies every entry of r into w. Each entry reader is closed
+// before the function returns.
+func copyZipEntries(w *zip.Writer, r *zip.ReadCloser) error {
 	for _, f := range r.File {
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
-
 		hdr := f.FileHeader
 		hdr.Method = zip.Deflate
-
 		dst, err := w.CreateHeader(&hdr)
+		if err == nil {
+			_, err = io.Copy(dst, rc)
+		}
+		if cerr := rc.Close(); err == nil {
+			err = cerr
+		}
 		if err != nil {
-			errRc := rc.Close()
-			if errRc != nil {
-				ErrorLogger.Println(errRc)
-			}
-			return err
-		}
-
-		if _, err = io.Copy(dst, rc); err != nil {
-			errRc := rc.Close()
-			if errRc != nil {
-				ErrorLogger.Println(errRc)
-			}
-			return err
-		}
-		errRc := rc.Close()
-		if errRc != nil {
 			return err
 		}
 	}
+	return nil
+}
 
-	// Add new file
-	file, err := os.Open(filePath)
-	if err != nil {
+// replaceFile moves src over dst. If the rename fails and dst exists (on
+// Windows, antivirus or indexer handles can block replacing a file), dst is
+// removed and the rename is retried. In that fallback there is a short window
+// in which dst does not exist; src is never touched on failure.
+func replaceFile(src, dst string) error {
+	err := os.Rename(src, dst)
+	if err == nil {
+		return nil
+	}
+	// Only fall back when the source exists and the target is in the way.
+	if _, serr := os.Lstat(src); serr != nil {
 		return err
 	}
-	defer func(file *os.File) {
-		err := file.Close()
-		if err != nil {
-
-		}
-	}(file)
-
-	info, err := file.Stat()
-	if err != nil {
+	if _, serr := os.Lstat(dst); serr != nil {
 		return err
 	}
-
-	hdr, err := zip.FileInfoHeader(info)
-	if err != nil {
+	if rerr := os.Remove(dst); rerr != nil {
 		return err
 	}
-	hdr.Name = fileName
+	return os.Rename(src, dst)
+}
 
-	dst, err := w.CreateHeader(hdr)
-	if err != nil {
-		return err
+// isRunnableScript reports whether info is a script or program that
+// RunPreScripts / RunConverterScripts may execute. On Windows that is a
+// regular file with the extension .exe (any case); elsewhere any regular file
+// with an execute bit. Directories, non-regular files and hidden files
+// (leading dot) never qualify.
+func isRunnableScript(info os.FileInfo) bool {
+	if info == nil || !info.Mode().IsRegular() || strings.HasPrefix(info.Name(), ".") {
+		return false
 	}
-
-	if _, err := io.Copy(dst, file); err != nil {
-		return err
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(filepath.Ext(info.Name()), ".exe")
 	}
-
-	// Close zip writer
-	if err := w.Close(); err != nil {
-		return err
-	}
-
-	if err := tmpFile.Close(); err != nil {
-		return err
-	}
-
-	// Replace original zip
-	return os.Rename(tmpFile.Name(), zipPath)
+	return info.Mode()&0111 != 0
 }
