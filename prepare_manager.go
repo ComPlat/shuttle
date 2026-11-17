@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"time"
 )
 
 // TransferManager reacts on the channel done_files.
@@ -31,7 +32,32 @@ func (m *PrepareManager) doWork(quit chan int) {
 		case to_send := <-m.done_files:
 			// Errors are logged inside prepareOne; the next item is handled regardless.
 			_ = m.prepareOne(to_send)
+		case <-time.After(m.retryInterval()):
+			m.retryPendingHandOver()
 		}
+	}
+}
+
+// retryInterval is how often pending hand-overs are retried while no new
+// item arrives: -duration, but at least one second.
+func (m *PrepareManager) retryInterval() time.Duration {
+	if m.args.duration < time.Second {
+		return time.Second
+	}
+	return m.args.duration
+}
+
+// retryPendingHandOver moves entries that are still waiting in IncomingPath
+// into TempPath. A hand-over is blocked while the transfer manager still
+// works on an older entry with the same name; without this retry it would
+// only be retried when the next item arrives, which may never happen.
+func (m *PrepareManager) retryPendingHandOver() {
+	pending, err := ReadDirCompat(IncomingPath)
+	if err != nil || len(pending) == 0 {
+		return
+	}
+	if err := CopyTempDirectory(); err != nil {
+		ErrorLogger.Println(err)
 	}
 }
 
