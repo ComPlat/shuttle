@@ -28,6 +28,8 @@ var (
 	// entries are copied here first and then renamed into TempPath, so the
 	// transfer managers never see a half-copied file (WP 3.4).
 	IncomingPath string
+	// RegisterPath is the JSON file of the sent register (WP 3.9).
+	RegisterPath string
 	// ArchivePath holds zip/tar archives built by the transfer managers,
 	// outside the folder they scan (WP 3.2).
 	ArchivePath string
@@ -55,6 +57,7 @@ func initTool() {
 	IncomingPath = path.Join(shuttleFolderName, "shuttle_incoming")
 	ArchivePath = path.Join(shuttleFolderName, "shuttle_archive_temp")
 	FlatTarOutPath = path.Join(shuttleFolderName, "shuttle_flat_tar_out")
+	RegisterPath = path.Join(shuttleFolderName, "sent_register.json")
 	PreScriptPath = path.Join(mainShuttleFolderName, "scripts")
 
 	newPaths := []string{TempPath, PreTempPath, PreScriptPath, IncomingPath, ArchivePath}
@@ -128,7 +131,13 @@ func main() {
 	// For potential (not jet implemented quit conditions)
 	quit := make(chan int)
 	InfoLogger.Print(args.LogString())
-	pm := newProcessManager(&args, done_files)
+	register := LoadSentRegister(RegisterPath)
+	if register.Len() == 0 {
+		InfoLogger.Println("Sent register: 0 entries loaded, empty register: all stable files will be sent once")
+	} else {
+		InfoLogger.Printf("Sent register: %d entries loaded from %s", register.Len(), RegisterPath)
+	}
+	pm := newProcessManager(&args, done_files, register)
 	go pm.doWork(quit)
 
 	prm := newPrepareManager(&args, done_files)

@@ -18,7 +18,7 @@ func TestFlatTarPrefixes(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^(\w)_`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 
 	pm.collectTarPrefixes()
 	if len(pm.doneFlatPrefixes) != 2 {
@@ -88,7 +88,7 @@ func TestProcessTarPrefixesSpecialGroupNames(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^x(:y)_(z)__`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 	// Simulate a group name containing separators and a colon.
 	pm.doneFlatPrefixes = map[string][]string{"x:y/z": {":y", "z"}}
 
@@ -133,7 +133,7 @@ func TestProcessTarPrefixesTarFailureKeepsSources(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^(\w)_`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 	pm.collectTarPrefixes()
 	pm.processTarPrefixes()
 
@@ -162,7 +162,7 @@ func TestProcessTarPrefixesKeepsPendingTar(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^(\w)_`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 	pm.collectTarPrefixes()
 	pm.processTarPrefixes()
 
