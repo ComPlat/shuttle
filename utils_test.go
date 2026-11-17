@@ -191,7 +191,6 @@ func TestCopy(t *testing.T) {
 	})
 
 	t.Run("missing source leaves no dst", func(t *testing.T) {
-		t.Skip("known bug, fixed in WP 3.6: Copy leaves an empty destination file when the source is missing")
 		dst := filepath.Join(root, "dst4.txt")
 		_ = Copy(filepath.Join(root, "nope.txt"), dst)
 		if _, err := os.Stat(dst); !os.IsNotExist(err) {
@@ -330,4 +329,110 @@ func TestAddLinkToZip(t *testing.T) {
 	want := utilsWantEntries()
 	want[".link"] = "https://example.org/pub/file.bin"
 	utilsCheckEntries(t, readZipEntries(t, zp), want)
+}
+
+func TestArchiveMissingSourceLeavesNothing(t *testing.T) {
+	root, cleanup := newTempDir(t)
+	defer cleanup()
+	missing := filepath.Join(root, "nope")
+
+	if out, err := zipFolder(missing); err == nil || out != "" {
+		t.Errorf("zipFolder(missing) = %q, %v; want error", out, err)
+	}
+	if out, err := tarFolder(missing); err == nil || out != "" {
+		t.Errorf("tarFolder(missing) = %q, %v; want error", out, err)
+	}
+	for _, ext := range []string{".zip", ".tar.gz"} {
+		if _, err := os.Stat(missing + ext); !os.IsNotExist(err) {
+			t.Errorf("partial archive %s%s left behind (err=%v)", missing, ext, err)
+		}
+	}
+}
+
+func utilsEntryNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := ReadDirCompat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+func TestCopyTempDirectoryNormal(t *testing.T) {
+	_, restore := useTempGlobals(t)
+	defer restore()
+	writeTestFile(t, filepath.Join(PreTempPath, "A", "sub", "a.txt"), "aaa")
+	writeTestFile(t, filepath.Join(PreTempPath, "f.txt"), "fff")
+
+	if err := CopyTempDirectory(); err != nil {
+		t.Fatal(err)
+	}
+	for rel, want := range map[string]string{"A/sub/a.txt": "aaa", "f.txt": "fff"} {
+		b, err := ioutil.ReadFile(filepath.Join(TempPath, filepath.FromSlash(rel)))
+		if err != nil || string(b) != want {
+			t.Errorf("TempPath/%s = %q err=%v; want %q", rel, b, err, want)
+		}
+	}
+	if n := utilsEntryNames(t, IncomingPath); len(n) != 0 {
+		t.Errorf("IncomingPath should be empty, got %v", n)
+	}
+	if _, err := os.Stat(PreTempPath); !os.IsNotExist(err) {
+		t.Errorf("PreTempPath should be removed (err=%v)", err)
+	}
+}
+
+func TestCopyTempDirectoryBlockedStaysPending(t *testing.T) {
+	_, restore := useTempGlobals(t)
+	defer restore()
+	// The target folder already exists, so the rename is blocked.
+	writeTestFile(t, filepath.Join(TempPath, "A", "old.txt"), "old")
+	writeTestFile(t, filepath.Join(PreTempPath, "A", "new.txt"), "new")
+
+	if err := CopyTempDirectory(); err != nil {
+		t.Fatalf("a blocked rename is not an error: %v", err)
+	}
+	b, err := ioutil.ReadFile(filepath.Join(IncomingPath, "A", "new.txt"))
+	if err != nil || string(b) != "new" {
+		t.Errorf("entry must stay pending in IncomingPath, got %q err=%v", b, err)
+	}
+	if n := utilsEntryNames(t, TempPath); len(n) != 1 || n[0] != "A" {
+		t.Errorf("TempPath = %v", n)
+	}
+	if _, err := os.Stat(filepath.Join(TempPath, "A", "new.txt")); !os.IsNotExist(err) {
+		t.Errorf("TempPath must not see the partial entry (err=%v)", err)
+	}
+
+	// Once the target is gone, the next call moves the pending entry.
+	if err := os.RemoveAll(filepath.Join(TempPath, "A")); err != nil {
+		t.Fatal(err)
+	}
+	if err := CopyTempDirectory(); err != nil {
+		t.Fatal(err)
+	}
+	b, err = ioutil.ReadFile(filepath.Join(TempPath, "A", "new.txt"))
+	if err != nil || string(b) != "new" {
+		t.Errorf("pending entry not moved: %q err=%v", b, err)
+	}
+	if n := utilsEntryNames(t, IncomingPath); len(n) != 0 {
+		t.Errorf("IncomingPath should be empty, got %v", n)
+	}
+}
+
+func TestCopyTempDirectoryNewerReplacesPending(t *testing.T) {
+	_, restore := useTempGlobals(t)
+	defer restore()
+	writeTestFile(t, filepath.Join(TempPath, "A", "blocker.txt"), "b")
+	writeTestFile(t, filepath.Join(IncomingPath, "A", "v1.txt"), "v1")
+	writeTestFile(t, filepath.Join(PreTempPath, "A", "v2.txt"), "v2")
+
+	if err := CopyTempDirectory(); err != nil {
+		t.Fatal(err)
+	}
+	if n := utilsEntryNames(t, filepath.Join(IncomingPath, "A")); len(n) != 1 || n[0] != "v2.txt" {
+		t.Errorf("pending entry should hold only the newer copy, got %v", n)
+	}
 }

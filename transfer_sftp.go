@@ -8,11 +8,11 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net"
 	"os"
-	"path/filepath"
-	"strings"
+	"path"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -73,51 +73,55 @@ func (m *TransferManagerSftp) connect_to_server() error {
 	return nil
 }
 
-// send_file sends a file via WebDAV
-func (m *TransferManagerSftp) send_file(path_to_file string, file os.FileInfo) (bool, error) {
-	var webdavFilePath, urlPathDir string
-
-	err := m.connect_to_server()
-	if err != nil {
+// send_file uploads localPath to <dst path>/<remoteRel>.
+func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, error) {
+	if err := m.connect_to_server(); err != nil {
 		return false, err
 	}
-	if m.args.sendType == "file" {
-		webdavFilePath = file.Name()
-	} else if relpath, err := filepath.Rel(TempPath, path_to_file); err == nil {
-		webdavFilePath = strings.Replace(relpath, string(os.PathSeparator), "/", -1)
-		webdavFilePath = strings.TrimPrefix(webdavFilePath, "./")
-	} else {
-		return false, err
-	}
-	webdavFilePath = filepath.Join(m.dst.Path, webdavFilePath)
-	urlPathDir = filepath.Dir(webdavFilePath)
-	urlPathDir = strings.Replace(urlPathDir, string(os.PathSeparator), "/", -1)
-	webdavFilePath = strings.Replace(webdavFilePath, string(os.PathSeparator), "/", -1)
-	InfoLogger.Println("Sending...", webdavFilePath)
+	remote := path.Join(m.dst.Path, remoteRel)
+	InfoLogger.Println("Sending...", remote)
 
-	if urlPathDir != "." {
-		err := m.client.MkdirAll(urlPathDir)
-		if err != nil {
+	if dir := path.Dir(remote); dir != "." {
+		if err := m.client.MkdirAll(dir); err != nil {
 			return false, err
 		}
 	}
 
-	srcFile, err := os.Open(path_to_file)
+	srcFile, err := os.Open(localPath)
 	if err != nil {
 		return false, err
 	}
 	defer srcFile.Close()
-
-	dstFile, err := m.client.OpenFile(webdavFilePath, (os.O_WRONLY | os.O_CREATE | os.O_TRUNC))
-	if err != nil {
-		return false, err
-	}
-	defer dstFile.Close()
-
-	_, err = io.Copy(dstFile, srcFile)
+	info, err := srcFile.Stat()
 	if err != nil {
 		return false, err
 	}
 
+	dstFile, err := m.client.OpenFile(remote, (os.O_WRONLY | os.O_CREATE | os.O_TRUNC))
+	if err != nil {
+		return false, err
+	}
+	closed := false
+	defer func() {
+		if !closed {
+			_ = dstFile.Close()
+		}
+	}()
+
+	if _, err = io.Copy(dstFile, srcFile); err != nil {
+		return false, err
+	}
+	closed = true
+	if err = dstFile.Close(); err != nil {
+		return false, err
+	}
+
+	remoteInfo, err := m.client.Stat(remote)
+	if err != nil {
+		return false, err
+	}
+	if remoteInfo.Size() != info.Size() {
+		return false, fmt.Errorf("size mismatch for %s: local %d, remote %d", remote, info.Size(), remoteInfo.Size())
+	}
 	return true, nil
 }

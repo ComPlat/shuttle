@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"time"
 )
 
 // TransferManager reacts on the channel done_files.
@@ -29,43 +30,79 @@ func (m *PrepareManager) doWork(quit chan int) {
 			InfoLogger.Println("Quit transfer process.")
 			return
 		case to_send := <-m.done_files:
-			_, err := os.Stat(to_send)
-			if err != nil {
-				ErrorLogger.Println(err)
-				break
-			}
-			tempPath, err := CopyPreTempDirectory(to_send)
-			if m.args.sendType == "flat_tar" {
-				err := os.Remove(to_send)
-				if err != nil {
-					ErrorLogger.Println(err)
-				}
-			}
-			if err != nil {
-				ErrorLogger.Println(err)
-			}
-
-			RunPreScripts(tempPath)
-			if args.preconvert {
-				RunConverterScripts(tempPath)
-				filePath := tempPath + ".zip"
-				fileName := filepath.Base(filePath)
-				err := AddLinkToZip(filepath.Base(filePath), filePath)
-				if err != nil {
-					ErrorLogger.Println(err)
-				}
-				err = os.Rename(filePath, path.Join(TempConvertedPath, fileName))
-				if err != nil {
-					ErrorLogger.Println(err)
-				}
-			}
-			err = CopyTempDirectory()
-			if err != nil {
-				log.Fatal(err)
-			}
-
+			// Errors are logged inside prepareOne; the next item is handled regardless.
+			_ = m.prepareOne(to_send)
+		case <-time.After(m.retryInterval()):
+			m.retryPendingHandOver()
 		}
 	}
+}
+
+// retryInterval is how often pending hand-overs are retried while no new
+// item arrives: -duration, but at least one second.
+func (m *PrepareManager) retryInterval() time.Duration {
+	if m.args.duration < time.Second {
+		return time.Second
+	}
+	return m.args.duration
+}
+
+// retryPendingHandOver moves entries that are still waiting in IncomingPath
+// into TempPath. A hand-over is blocked while the transfer manager still
+// works on an older entry with the same name; without this retry it would
+// only be retried when the next item arrives, which may never happen.
+func (m *PrepareManager) retryPendingHandOver() {
+	pending, err := ReadDirCompat(IncomingPath)
+	if err != nil || len(pending) == 0 {
+		return
+	}
+	if err := CopyTempDirectory(); err != nil {
+		ErrorLogger.Println(err)
+	}
+}
+
+// prepareOne copies one finished item into PreTempPath, runs the scripts
+// and hands the result over to TempPath. If the copy into PreTempPath fails,
+// the source is left untouched and no script runs.
+func (m *PrepareManager) prepareOne(toSend string) error {
+	_, err := os.Stat(toSend)
+	if err != nil {
+		ErrorLogger.Println(err)
+		return err
+	}
+	tempPath, err := CopyPreTempDirectory(toSend)
+	if err != nil {
+		ErrorLogger.Println(err)
+		// Do not leave a partial copy behind: the next hand-over would pass it on.
+		_ = os.RemoveAll(tempPath)
+		return err
+	}
+	if m.args.sendType == "flat_tar" {
+		// The tar was copied completely, so the original is no longer needed.
+		if err := os.Remove(toSend); err != nil {
+			ErrorLogger.Println(err)
+		}
+	}
+
+	RunPreScripts(tempPath)
+	if args.preconvert {
+		RunConverterScripts(tempPath)
+		filePath := tempPath + ".zip"
+		fileName := filepath.Base(filePath)
+		err := AddLinkToZip(filepath.Base(filePath), filePath)
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+		err = os.Rename(filePath, path.Join(TempConvertedPath, fileName))
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+	}
+	err = CopyTempDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return nil
 }
 
 func newPrepareManager(args *Args, done_files chan string) PrepareManager {

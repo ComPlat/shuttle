@@ -76,6 +76,18 @@ If the shuttle has already been executed, the folder has already been created.
 
 Such a script can manipulate the file before it is sent. The script is called for each file that will be sent. The script gets one argument with the absolute path to the file. The script should either overwrite the file or write a new copy of the file in the same folder
 
+### Which files are sent (sent register)
+
+Shuttle remembers every file it has handed over for upload in `~/shuttle/shuttle_<name>/sent_register.json` (path relative to `-src`, modification time and size).
+
+- A file (`-type file` / `flat_tar`) is sent when it is new or has changed since it was last sent, has not been modified for `-duration` seconds, and is not locked by another program.
+- A folder (`-type folder` / `zip` / `tar`) is sent when at least one of its files is new or changed, and all of its files have been unchanged for `-duration` seconds and are unlocked. A changed folder is always sent again **completely**.
+- **First start, or an empty or missing register:** every file already in `-src` that is older than `-duration` is sent once. When updating from Shuttle 1.12 or older, existing data in `-src` is uploaded again.
+- To send everything again, stop Shuttle and delete `sent_register.json`. A damaged register is moved aside as `sent_register.json.corrupt-<time>`, and Shuttle starts with an empty register.
+- If `-src` is temporarily unreachable (e.g. a network drive), the register is kept unchanged.
+
+A local file is only deleted from Shuttle's working folders after its upload has been confirmed; failed uploads are retried with increasing waits (up to `-duration`).
+
 ## Configuration Checklist
 
 Before running Shuttle, configure the following:

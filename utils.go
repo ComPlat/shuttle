@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 )
 
@@ -116,17 +117,48 @@ func CopyPreTempDirectory(scrDir string) (string, error) {
 	return filepath.Join(PreTempPath, newPath), err
 }
 
+// CopyTempDirectory hands the prepared entries over to TempPath atomically.
+// Every entry is first copied completely into IncomingPath and then renamed
+// into TempPath, so the transfer managers never see a half-copied entry.
+// An entry whose rename is blocked (for example because the target still
+// exists) stays pending in IncomingPath and is retried by the next call.
 func CopyTempDirectory() error {
-	entries, err := ReadDirCompat(PreTempPath)
+	_ = os.MkdirAll(IncomingPath, os.ModePerm)
+	_ = os.MkdirAll(TempPath, os.ModePerm)
+
+	// 1. Retry entries that are still pending from earlier calls.
+	pending, err := ReadDirCompat(IncomingPath)
 	if err != nil {
 		return err
 	}
+	for _, p := range pending {
+		from := filepath.Join(IncomingPath, p.Name())
+		if err := os.Rename(from, filepath.Join(TempPath, p.Name())); err != nil {
+			InfoLogger.Println("hand-over of", p.Name(), "is still pending:", err)
+		}
+	}
 
+	// 2. Copy the new entries into IncomingPath and rename them into place.
+	entries, err := ReadDirCompat(PreTempPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Nothing new to hand over; pending entries were retried above.
+			return nil
+		}
+		return err
+	}
 	for _, file := range entries {
-		absTempPath := filepath.Join(PreTempPath, file.Name())
-		err := copyDirectory(absTempPath, TempPath)
-		if err != nil {
+		absPreTempPath := filepath.Join(PreTempPath, file.Name())
+		staged := filepath.Join(IncomingPath, file.Name())
+		// A pending older version is replaced by the newer, complete copy.
+		if err := os.RemoveAll(staged); err != nil {
 			return err
+		}
+		if err := copyDirectory(absPreTempPath, IncomingPath); err != nil {
+			return err
+		}
+		if err := os.Rename(staged, filepath.Join(TempPath, file.Name())); err != nil {
+			InfoLogger.Println("hand-over of", file.Name(), "is pending:", err)
 		}
 	}
 
@@ -135,13 +167,18 @@ func CopyTempDirectory() error {
 
 func copyDirectory(scrDir string, destDir string) error {
 	return filepath.Walk(scrDir, func(sourcePath string, fileInfo os.FileInfo, e error) error {
+		if e != nil {
+			return e
+		}
 		destPath, err := filepath.Rel(filepath.Dir(scrDir), sourcePath)
 		if err != nil {
 			return err
 		}
 		destPath = filepath.Join(destDir, destPath)
 		if fileInfo.IsDir() {
-			_ = os.MkdirAll(destPath, 0755)
+			if err := os.MkdirAll(destPath, 0755); err != nil {
+				return err
+			}
 		} else {
 			if err := Copy(sourcePath, destPath); err != nil {
 				return err
@@ -151,63 +188,54 @@ func copyDirectory(scrDir string, destDir string) error {
 	})
 }
 
+// Copy copies srcFile to dstFile. The source is opened first, so a missing
+// source creates no destination. If anything fails after the destination was
+// created, the partial destination is removed.
 func Copy(srcFile, dstFile string) error {
-	out, err := os.Create(dstFile)
+	in, err := os.Open(srcFile)
 	if err != nil {
 		return err
 	}
-
-	defer func(out *os.File) {
-		if err := out.Close(); err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(out)
-
-	in, err := os.Open(srcFile)
 	defer func(in *os.File) {
 		if err := in.Close(); err != nil {
 			ErrorLogger.Println(err)
 		}
 	}(in)
+
+	out, err := os.Create(dstFile)
 	if err != nil {
 		return err
 	}
 
 	_, err = io.Copy(out, in)
+	if cerr := out.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
+		_ = os.Remove(dstFile)
 		return err
 	}
-
 	return nil
 }
 
 // zipFolder zips a folder and safes the zipped folder with the same name in the same directory.
+// On any error the partial archive is removed and "" is returned.
 func zipFolder(path_src string) (string, error) {
-	// Create a buffer to write our archive to.
 	output_path := path_src + ".zip"
 	outFile, err := os.Create(output_path)
 	if err != nil {
 		return "", err
 	}
-	defer func(outFile *os.File) {
-		err := outFile.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(outFile)
 
 	// Create a new zip archive.
 	w := zip.NewWriter(outFile)
-	defer func(w *zip.Writer) {
-		err := w.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(w)
 	err = filepath.Walk(path_src,
 		func(path string, info os.FileInfo, err error) error {
-			if info.IsDir() {
+			if err != nil {
 				return err
+			}
+			if info.IsDir() {
+				return nil
 			}
 
 			rel_path, err := filepath.Rel(path_src, path)
@@ -230,52 +258,40 @@ func zipFolder(path_src string) (string, error) {
 
 		})
 
-	// Make sure to check the error on Close.
-
+	// Close in order (zip, then file) and keep the first error.
+	if cerr := w.Close(); err == nil {
+		err = cerr
+	}
+	if cerr := outFile.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
+		_ = os.Remove(output_path)
 		return "", err
 	}
 	return output_path, nil
 }
 
-// tarFolder zips a folder and safes the zipped folder with the same name in the same directory.
+// tarFolder tars and gzips a folder and saves it as <folder>.tar.gz in the same directory.
+// On any error the partial archive is removed and "" is returned.
 func tarFolder(path_src string) (string, error) {
-	// Create a buffer to write our archive to.
 	output_path := path_src + ".tar.gz"
 	outFile, err := os.Create(output_path)
 	if err != nil {
 		return "", err
 	}
-	defer func(outFile *os.File) {
-		err := outFile.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(outFile)
 
-	// Create new Writers for gzip and tar
-	// These writers are chained. Writing to the tar writer will
-	// write to the gzip writer which in turn will write to
-	// the "buf" writer
+	// These writers are chained: tar -> gzip -> file.
 	gw := gzip.NewWriter(outFile)
-	defer func(gwEnd *gzip.Writer) {
-		err := gwEnd.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(gw)
 	tw := tar.NewWriter(gw)
-	defer func(twEnd *tar.Writer) {
-		err := twEnd.Close()
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-	}(tw)
 
 	err = filepath.Walk(path_src,
 		func(path string, info os.FileInfo, err error) error {
-			if info.IsDir() {
+			if err != nil {
 				return err
+			}
+			if info.IsDir() {
+				return nil
 			}
 
 			rel_path, err := filepath.Rel(path_src, path)
@@ -288,21 +304,17 @@ func tarFolder(path_src string) (string, error) {
 				return err
 			}
 
-			defer func(file *os.File) {
-				if file.Close() != nil {
-					return
-				}
-			}(file)
-
 			// Get FileInfo about our file providing file size, mode, etc.
 			finfo, err := file.Stat()
 			if err != nil {
+				_ = file.Close()
 				return err
 			}
 
 			// Create a tar Header from the FileInfo data
 			header, err := tar.FileInfoHeader(finfo, finfo.Name())
 			if err != nil {
+				_ = file.Close()
 				return err
 			}
 
@@ -312,28 +324,73 @@ func tarFolder(path_src string) (string, error) {
 			// https://golang.org/src/archive/tar/common.go?#L626
 			header.Name = rel_path
 
-			// Write file header to the tar archive
 			err = tw.WriteHeader(header)
-			if err != nil {
-				return err
+			if err == nil {
+				_, err = io.Copy(tw, file)
 			}
-
-			// Copy file content to tar archive
-			_, err = io.Copy(tw, file)
-			if err != nil {
-				return err
+			if cerr := file.Close(); err == nil {
+				err = cerr
 			}
-
-			return nil
-
+			return err
 		})
 
-	// Make sure to check the error on Close.
-
+	// Close in order (tar, gzip, file) and keep the first error.
+	if cerr := tw.Close(); err == nil {
+		err = cerr
+	}
+	if cerr := gw.Close(); err == nil {
+		err = cerr
+	}
+	if cerr := outFile.Close(); err == nil {
+		err = cerr
+	}
 	if err != nil {
+		_ = os.Remove(output_path)
 		return "", err
 	}
 	return output_path, nil
+}
+
+// safeDirName turns a name built from regex groups into a valid folder name
+// on every platform: the characters < > : " / \ | ? * and control characters
+// become "_", trailing dots and spaces are trimmed (Windows forbids them) and
+// an empty result becomes "_archive".
+func safeDirName(name string) string {
+	b := []rune(name)
+	for i, r := range b {
+		switch r {
+		case '<', '>', ':', '"', '/', '\\', '|', '?', '*':
+			b[i] = '_'
+		default:
+			if r < 0x20 || r == 0x7f {
+				b[i] = '_'
+			}
+		}
+	}
+	res := strings.TrimRight(string(b), ". ")
+	if res == "" {
+		return "_archive"
+	}
+	return res
+}
+
+// uniqueName returns base if dir/base does not exist, otherwise
+// <stem>_dupN<ext> with the smallest free N >= 1. ext is everything after
+// the first dot of base, so "a.tar.gz" becomes "a_dup1.tar.gz".
+func uniqueName(dir, base string) string {
+	if _, err := os.Lstat(filepath.Join(dir, base)); os.IsNotExist(err) {
+		return base
+	}
+	stem, ext := base, ""
+	if i := strings.Index(base, "."); i >= 0 {
+		stem, ext = base[:i], base[i:]
+	}
+	for n := 1; ; n++ {
+		cand := stem + "_dup" + strconv.Itoa(n) + ext
+		if _, err := os.Lstat(filepath.Join(dir, cand)); os.IsNotExist(err) {
+			return cand
+		}
+	}
 }
 
 func AddLinkToZip(file, zipPath string) error {

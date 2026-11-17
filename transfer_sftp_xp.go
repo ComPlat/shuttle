@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -70,38 +71,21 @@ func (m *TransferManagerSftp) connect_to_server() error {
 	return winscp(sftpConnStr)
 }
 
-// send_file sends a file via WebDAV
-func (m *TransferManagerSftp) send_file(path_to_file string, file os.FileInfo) (bool, error) {
-	var webdavFilePath, urlPathDir string
-
-	if m.args.sendType == "file" {
-		webdavFilePath = file.Name()
-	} else if relpath, err := filepath.Rel(TempPath, path_to_file); err == nil {
-		webdavFilePath = strings.Replace(relpath, string(os.PathSeparator), "/", -1)
-		webdavFilePath = strings.TrimPrefix(webdavFilePath, "./")
-	} else {
-		return false, err
-	}
-	webdavFilePath = filepath.Join(m.dst.Path, webdavFilePath)
-	urlPathDir = filepath.Dir(webdavFilePath)
-	InfoLogger.Println("Sending...", webdavFilePath)
+// send_file uploads localPath to <dst path>/<remoteRel>.
+func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, error) {
+	remote := path.Join(m.dst.Path, remoteRel)
+	InfoLogger.Println("Sending...", remote)
 
 	sftpConnStr := fmt.Sprintf("sftp://%s:%s@%s/", m.user, m.pass, m.dst.Host)
-	if relpath, err := filepath.Rel(m.dst.Path, urlPathDir); err == nil {
-		urlPathDir = strings.Replace(relpath, string(os.PathSeparator), "/", -1)
-	} else {
-		return false, err
-	}
-
-	cwp := m.dst.Path
-	webdavFilePath = strings.Replace(webdavFilePath, string(os.PathSeparator), "/", -1)
-	for _, s := range strings.Split(urlPathDir, "/") {
-		cwp := cwp + "/" + s
-		_ = winscp("/command \"open "+sftpConnStr+"\"", fmt.Sprintf("\"mkdir \"\"%s\"\"\"", cwp), "\"exit\"")
+	if dir := path.Dir(remoteRel); dir != "." {
+		for _, s := range strings.Split(dir, "/") {
+			cwp := m.dst.Path + "/" + s
+			_ = winscp("/command \"open "+sftpConnStr+"\"", fmt.Sprintf("\"mkdir \"\"%s\"\"\"", cwp), "\"exit\"")
+		}
 	}
 
 	err := winscp("/command", "\"open "+sftpConnStr+"\"",
-		fmt.Sprintf("\"put \"\"%s\"\" \"\"%s\"\"\"", path_to_file, webdavFilePath),
+		fmt.Sprintf("\"put \"\"%s\"\" \"\"%s\"\"\"", localPath, remote),
 		"\"exit\"")
 
 	return err == nil, err
