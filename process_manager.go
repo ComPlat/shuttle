@@ -155,6 +155,12 @@ type scanGroup struct {
 	blocked bool // an unstable or locked file holds the group back
 }
 
+// lockCheck is a file that must be checked for a lock if its group becomes
+// a send candidate.
+type lockCheck struct {
+	key, path string
+}
+
 // scanReady walks -src once. It returns the ready keys (file rel paths, or
 // root folders for folder/zip/tar) with all files that belong to them, and
 // the set of all file keys it saw. Only an error at the -src root is returned;
@@ -163,6 +169,7 @@ func (m ProcessManager) scanReady(now time.Time) (map[string][]readyFile, map[st
 	perFile := m.args.sendType == "file" || m.args.sendType == "flat_tar"
 	groups := make(map[string]*scanGroup)
 	seen := make(map[string]bool)
+	var toCheck []lockCheck
 	err := filepath.Walk(m.args.src,
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -199,13 +206,27 @@ func (m ProcessManager) scanReady(now time.Time) (map[string][]readyFile, map[st
 			if perFile && !changed {
 				return nil
 			}
-			if now.Sub(info.ModTime()) <= m.args.duration || m.isFileLocked(path) {
+			if now.Sub(info.ModTime()) <= m.args.duration {
 				g.blocked = true
+			} else {
+				toCheck = append(toCheck, lockCheck{key: key, path: path})
 			}
 			return nil
 		})
 	if err != nil {
 		return map[string][]readyFile{}, seen, err
+	}
+	// The lock check renames a file onto itself. Only do that for files of
+	// groups that would otherwise be sent, never for unchanged folders: a
+	// lab PC's whole source tree must not be touched on every pass.
+	for _, c := range toCheck {
+		g := groups[c.key]
+		if !g.changed || g.blocked {
+			continue
+		}
+		if m.isFileLocked(c.path) {
+			g.blocked = true
+		}
 	}
 	ready := make(map[string][]readyFile)
 	for key, g := range groups {

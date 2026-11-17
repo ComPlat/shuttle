@@ -505,3 +505,54 @@ func mustStat(t *testing.T, p string) os.FileInfo {
 	}
 	return info
 }
+
+// Unchanged files must never be lock-checked (the check renames the file onto
+// itself); only files of groups that are about to be sent are.
+func TestScanReadyLockCheckOnlyForCandidates(t *testing.T) {
+	src, cleanup := newTempDir(t)
+	defer cleanup()
+	for _, f := range []string{
+		filepath.Join("A", "a1.txt"), filepath.Join("A", "a2.txt"),
+		filepath.Join("B", "b1.txt"), filepath.Join("B", "b2.txt"),
+	} {
+		p := filepath.Join(src, f)
+		writeTestFile(t, p, "x")
+		setAge(t, p, 60*time.Second)
+	}
+	reg := newSentRegister()
+	for _, rel := range []string{"A/a1.txt", "A/a2.txt"} {
+		info, err := os.Stat(filepath.Join(src, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		reg.Record(rel, info)
+	}
+
+	checked := map[string]int{}
+	defer scanTestSetFileLocked(func(path string) bool {
+		rel, _ := filepath.Rel(src, path)
+		checked[filepath.ToSlash(rel)]++
+		return false
+	})()
+
+	for _, sendType := range []string{"folder", "file"} {
+		for k := range checked {
+			delete(checked, k)
+		}
+		a := &Args{src: src, duration: scanDuration, sendType: sendType}
+		m := newProcessManager(a, make(chan string, 20), reg)
+		ready, _, err := m.scanReady(time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if checked["A/a1.txt"] != 0 || checked["A/a2.txt"] != 0 {
+			t.Errorf("%s: unchanged files were lock-checked: %v", sendType, checked)
+		}
+		if checked["B/b1.txt"] != 1 || checked["B/b2.txt"] != 1 {
+			t.Errorf("%s: candidate files must be lock-checked once: %v", sendType, checked)
+		}
+		if len(ready) == 0 {
+			t.Errorf("%s: B must be ready, got %v", sendType, ready)
+		}
+	}
+}
