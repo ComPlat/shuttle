@@ -3,9 +3,7 @@ package main
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
+	"path"
 	"time"
 
 	"github.com/StarmanMartin/gowebdav"
@@ -41,46 +39,32 @@ func (m *TransferManagerWebdav) connect_to_server() error {
 	return nil
 }
 
-// send_file sends a file via WebDAV
-func (m *TransferManagerWebdav) send_file(path_to_file string, file os.FileInfo) (bool, error) {
-	var webdavFilePath, urlPathDir string
-
-	err := m.connect_to_server()
-	if err != nil {
-		return false, err
-	}
-	if m.args.sendType == "file" {
-		urlPathDir = "."
-		webdavFilePath = file.Name()
-	} else if relpath, err := filepath.Rel(TempPath, path_to_file); err == nil {
-		webdavFilePath = strings.Replace(relpath, string(os.PathSeparator), "/", -1)
-		webdavFilePath = strings.TrimPrefix(webdavFilePath, "./")
-		urlPathDir = filepath.Dir(webdavFilePath)
-	} else {
-		return false, err
-	}
-	InfoLogger.Println("Sending...", webdavFilePath)
-
-	if urlPathDir != "." {
-		err := m.client.MkdirAll(urlPathDir, 0644)
-		if err != nil {
-			return false, err
-		}
-	}
-
-	bytes, err := ReadFileCompat(path_to_file)
-	if err != nil {
-		return false, err
-	}
-
+// send_file uploads localPath to <dst>/<remoteRel>. The client root is dst.
+func (m *TransferManagerWebdav) send_file(localPath, remoteRel string) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
-
+			ok = false
 			err = errors.New(fmt.Sprintf("%+v", r))
 			ErrorLogger.Printf("WebDav Panic: %s\n", err)
 		}
 	}()
-	err = m.client.Write(webdavFilePath, bytes, 0644)
 
-	return true, err
+	if err = m.connect_to_server(); err != nil {
+		return false, err
+	}
+	InfoLogger.Println("Sending...", remoteRel)
+
+	if dir := path.Dir(remoteRel); dir != "." {
+		if err = m.client.MkdirAll(dir, 0644); err != nil {
+			return false, err
+		}
+	}
+
+	bytes, err := ReadFileCompat(localPath)
+	if err != nil {
+		return false, err
+	}
+
+	err = m.client.Write(remoteRel, bytes, 0644)
+	return err == nil, err
 }
