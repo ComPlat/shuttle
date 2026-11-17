@@ -6,6 +6,10 @@ package main
 // os.MkdirTemp or io.Discard. Use the helpers below instead.
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"compress/gzip"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -84,4 +88,66 @@ func useTempGlobals(t *testing.T) (string, func()) {
 			old[0], old[1], old[2], old[3], old[4], old[5]
 		cleanup()
 	}
+}
+
+// readZipEntries returns entry name -> content, with names exactly as stored.
+func readZipEntries(t *testing.T, path string) map[string]string {
+	t.Helper()
+	r, err := zip.OpenReader(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	got := map[string]string{}
+	for _, f := range r.File {
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := ioutil.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[f.Name] = string(b)
+	}
+	return got
+}
+
+// readTarGzEntries returns entry name -> content, with names exactly as stored.
+func readTarGzEntries(t *testing.T, path string) map[string]string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	gr, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tr := tar.NewReader(gr)
+	got := map[string]string{}
+	for {
+		h, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := ioutil.ReadAll(tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got[h.Name] = string(b)
+	}
+	// Reading the gzip stream to its end verifies the trailer (closed writer).
+	if _, err := io.Copy(ioutil.Discard, gr); err != nil {
+		t.Fatal(err)
+	}
+	if err := gr.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return got
 }

@@ -1,10 +1,6 @@
 package main
 
 import (
-	"archive/tar"
-	"archive/zip"
-	"compress/gzip"
-	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -62,68 +58,6 @@ func utilsWantEntries() map[string]string {
 	}
 }
 
-// utilsReadZip returns entry name -> content, with names exactly as stored.
-func utilsReadZip(t *testing.T, path string) map[string]string {
-	t.Helper()
-	r, err := zip.OpenReader(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer r.Close()
-	got := map[string]string{}
-	for _, f := range r.File {
-		rc, err := f.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := ioutil.ReadAll(rc)
-		rc.Close()
-		if err != nil {
-			t.Fatal(err)
-		}
-		got[f.Name] = string(b)
-	}
-	return got
-}
-
-// utilsReadTarGz returns entry name -> content, with names exactly as stored.
-func utilsReadTarGz(t *testing.T, path string) map[string]string {
-	t.Helper()
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	tr := tar.NewReader(gr)
-	got := map[string]string{}
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := ioutil.ReadAll(tr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		got[h.Name] = string(b)
-	}
-	// Reading the gzip stream to its end verifies the trailer (closed writer).
-	if _, err := io.Copy(ioutil.Discard, gr); err != nil {
-		t.Fatal(err)
-	}
-	if err := gr.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return got
-}
-
 func utilsSlashKeys(m map[string]string) map[string]string {
 	out := map[string]string{}
 	for k, v := range m {
@@ -162,7 +96,7 @@ func TestZipFolder(t *testing.T) {
 	if out != a+".zip" {
 		t.Errorf("zipFolder output = %q; want %q", out, a+".zip")
 	}
-	utilsCheckEntries(t, utilsReadZip(t, out), utilsWantEntries())
+	utilsCheckEntries(t, readZipEntries(t, out), utilsWantEntries())
 }
 
 func TestTarFolder(t *testing.T) {
@@ -177,7 +111,7 @@ func TestTarFolder(t *testing.T) {
 	if out != a+".tar.gz" {
 		t.Errorf("tarFolder output = %q; want %q", out, a+".tar.gz")
 	}
-	utilsCheckEntries(t, utilsReadTarGz(t, out), utilsWantEntries())
+	utilsCheckEntries(t, readTarGzEntries(t, out), utilsWantEntries())
 }
 
 func TestArchiveEntryNamesUseSlash(t *testing.T) {
@@ -198,8 +132,8 @@ func TestArchiveEntryNamesUseSlash(t *testing.T) {
 	}
 	want := utilsWantEntries()
 	for label, got := range map[string]map[string]string{
-		"zip": utilsReadZip(t, zp),
-		"tar": utilsReadTarGz(t, tp),
+		"zip": readZipEntries(t, zp),
+		"tar": readTarGzEntries(t, tp),
 	} {
 		if len(got) != len(want) {
 			t.Errorf("%s entries = %v; want %v", label, got, want)
@@ -368,7 +302,7 @@ func TestAddFileToZip(t *testing.T) {
 
 	want := utilsWantEntries()
 	want["added.txt"] = "extra content"
-	utilsCheckEntries(t, utilsReadZip(t, zp), want)
+	utilsCheckEntries(t, readZipEntries(t, zp), want)
 }
 
 func TestAddLinkToZip(t *testing.T) {
@@ -395,5 +329,5 @@ func TestAddLinkToZip(t *testing.T) {
 
 	want := utilsWantEntries()
 	want[".link"] = "https://example.org/pub/file.bin"
-	utilsCheckEntries(t, utilsReadZip(t, zp), want)
+	utilsCheckEntries(t, readZipEntries(t, zp), want)
 }

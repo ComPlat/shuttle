@@ -1,47 +1,11 @@
 package main
 
 import (
-	"archive/tar"
-	"compress/gzip"
-	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
 	"testing"
 )
-
-// flatTarReadTar returns entry name -> content of a .tar.gz file.
-func flatTarReadTar(t *testing.T, path string) map[string]string {
-	t.Helper()
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	gr, err := gzip.NewReader(f)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer gr.Close()
-	tr := tar.NewReader(gr)
-	res := make(map[string]string)
-	for {
-		h, err := tr.Next()
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			t.Fatal(err)
-		}
-		b, err := ioutil.ReadAll(tr)
-		if err != nil {
-			t.Fatal(err)
-		}
-		res[h.Name] = string(b)
-	}
-	return res
-}
 
 func TestFlatTarPrefixes(t *testing.T) {
 	_, restore := useTempGlobals(t)
@@ -89,7 +53,7 @@ func TestFlatTarPrefixes(t *testing.T) {
 			t.Errorf("unexpected tar %s", p)
 			continue
 		}
-		got := flatTarReadTar(t, p)
+		got := readTarGzEntries(t, p)
 		if len(got) != len(w) {
 			t.Errorf("%s: entries %v, want %v", base, got, w)
 		}
