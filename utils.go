@@ -10,7 +10,6 @@ import (
 	"log"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -415,7 +414,7 @@ func uniqueName(dir, base string) string {
 // AddLinkToZip adds the entry ".link" (public URL + base name of file) to the
 // zip. No temp file is involved.
 func AddLinkToZip(file, zipPath string) error {
-	return AddBytesToZip(zipPath, ".link", []byte(args.public+path.Base(file)))
+	return AddBytesToZip(zipPath, ".link", []byte(args.public+filepath.Base(file)))
 }
 
 // AddFileToZip adds the file filePath as entry fileName to the zip.
