@@ -25,7 +25,9 @@ Shuttle is a utility that facilitates seamless file transfer from a source devic
 
 1. **Windows XP Compatibility**
    - To run this tool on Windows XP, it must be compiled with Go version `1.10.8`.
-   - When using the SFTP protocol on Windows XP, save a portable version of [WinSCP](https://winscp.net/download/WinSCP-5.21.5-Portable.zip) in the same folder as `shuttle.exe`.
+   - When using the SFTP protocol on Windows XP, save a portable version of [WinSCP](https://winscp.net/download/WinSCP-5.21.5-Portable.zip) in the same folder as `shuttle.exe` (`WinSCP.com` must be there). Shuttle writes a short temporary script into its shuttle folder, runs `WinSCP.com` on it once per uploaded file and deletes it afterwards. The password is never written to the log. At startup a connection check is run, so a missing `WinSCP.com` or a rejected host key shows up immediately in the log.
+   - **Host key:** pass the server's SSH host key fingerprint with `-hostkey`, e.g. `-hostkey "ssh-ed25519 255 SHA256:AbCd..."`. Without `-hostkey`, WinSCP must already know the key: connect once with WinSCP on that machine and accept the key, otherwise every upload fails (Shuttle logs a warning at startup).
+   - **Getting the fingerprint:** in WinSCP, connect to the server and open *Session → Server/Protocol Information*; copy the host key fingerprint shown there. On Linux, `ssh-keyscan -p <port> <host> 2>/dev/null | ssh-keygen -lf -` prints it (use the `SHA256:...` value).
 
 ---
 
