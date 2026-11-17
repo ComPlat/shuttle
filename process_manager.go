@@ -104,9 +104,56 @@ func (m ProcessManager) processTarPrefixes() {
 	}
 }
 
+// fileLockedFn reports whether the file at path is locked by another process.
+// It is a variable so that tests can inject a fake.
+var fileLockedFn = func(path string) bool {
+	return os.Rename(path, path) != nil
+}
+
 func (m ProcessManager) isFileLocked(path string) bool {
-	err := os.Rename(path, path)
-	return err != nil
+	return fileLockedFn(path)
+}
+
+// scanReady walks <CMD arg -src> once and returns, per file or root folder, whether it is
+// ready to be sent (true) or was modified within the last <duration> (false).
+func (m ProcessManager) scanReady(now time.Time, lockedFiles map[string]struct{}) (map[string]bool, error) {
+	doneFolders := make(map[string]bool)
+	// Checking all files in <CMD arg -src>.
+	err := filepath.Walk(m.args.src,
+		func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			if !info.IsDir() {
+				modified := info.ModTime()
+				diff := now.Sub(modified)
+				if m.isFileLocked(path) {
+					lockedFiles[path] = struct{}{}
+				} else if _, exists := lockedFiles[path]; exists || diff < 2*m.args.duration {
+					if exists {
+						delete(lockedFiles, path)
+					}
+					if relPath, err := filepath.Rel(m.args.src, path); err == nil {
+						folder := relPath
+						if m.args.sendType != "file" && m.args.sendType != "flat_tar" {
+							folder = getRootDir(relPath)
+						}
+
+						if _, ok := doneFolders[folder]; !ok {
+							doneFolders[folder] = true
+						}
+
+						if diff <= m.args.duration {
+							doneFolders[folder] = false
+						}
+					} else {
+						ErrorLogger.Println(err)
+					}
+				}
+			}
+			return nil
+		})
+	return doneFolders, err
 }
 
 // doWork runs in an endless loop. It watches the files in the <CMD arg -src> directory.
@@ -120,42 +167,7 @@ func (m ProcessManager) doWork(quit chan int) {
 			return
 		default:
 			now := time.Now()
-			doneFolders := make(map[string]bool)
-			// Checking all files in <CMD arg -src>.
-			err := filepath.Walk(m.args.src,
-				func(path string, info os.FileInfo, err error) error {
-					if err != nil {
-						return err
-					}
-					if !info.IsDir() {
-						modified := info.ModTime()
-						diff := now.Sub(modified)
-						if m.isFileLocked(path) {
-							lockedFiles[path] = struct{}{}
-						} else if _, exists := lockedFiles[path]; exists || diff < 2*m.args.duration {
-							if exists {
-								delete(lockedFiles, path)
-							}
-							if relPath, err := filepath.Rel(m.args.src, path); err == nil {
-								folder := relPath
-								if m.args.sendType != "file" && m.args.sendType != "flat_tar" {
-									folder = getRootDir(relPath)
-								}
-
-								if _, ok := doneFolders[folder]; !ok {
-									doneFolders[folder] = true
-								}
-
-								if diff <= m.args.duration {
-									doneFolders[folder] = false
-								}
-							} else {
-								ErrorLogger.Println(err)
-							}
-						}
-					}
-					return nil
-				})
+			doneFolders, err := m.scanReady(now, lockedFiles)
 
 			if err != nil {
 				ErrorLogger.Println(err)

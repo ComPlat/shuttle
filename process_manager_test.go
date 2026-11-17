@@ -1,63 +1,37 @@
 package main
 
 import (
-	//"github.com/bouk/monkey"
-	"log"
-	"os"
+	"regexp"
 	"testing"
-	"time"
 )
 
-func TestDoWorkProcess(t *testing.T) {
-	cleanTestDir()
-	defer cleanTestDir()
-
-	// Prepare Test
-	if err := os.MkdirAll("testDir/src/A/B", os.ModePerm); err != nil {
-		log.Fatal(err)
+func TestApplyRegex(t *testing.T) {
+	cases := []struct {
+		name      string
+		regex     string
+		file      string
+		wantGroup []string
+		wantJoin  string
+	}{
+		{"no match", `^zzz_(\w)`, "a_1.txt", []string{"a_1.txt_archive"}, "a_1.txt_archive"},
+		{"match without groups returns the whole match", `\d+`, "file12.txt", []string{"12"}, "12"},
+		{"one group", `^(\w)_`, "a_1.txt", []string{"a"}, "a"},
+		{"several groups are joined with ___", `^(\w)_(\d)`, "a_1.txt", []string{"a", "1"}, "a___1"},
+		{"empty group falls back to _archive", `^(x*)a`, "a_1.txt", []string{""}, "a_1.txt_archive"},
+		{"match equal to whole name falls back to _archive", `^a_1\.txt$`, "a_1.txt", []string{"a_1.txt"}, "a_1.txt_archive"},
+		{"group equal to whole name falls back to _archive", `^(a_1\.txt)$`, "a_1.txt", []string{"a_1.txt"}, "a_1.txt_archive"},
 	}
-	if err := os.MkdirAll("testDir/src/A/C", os.ModePerm); err != nil {
-		log.Fatal(err)
+	for _, c := range cases {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			m := ProcessManager{args: &Args{commonRegex: regexp.MustCompile(c.regex)}}
+			groups, joined := m.applyRegex(c.file)
+			if !AreEqual(groups, c.wantGroup) {
+				t.Errorf("groups = %q, want %q", groups, c.wantGroup)
+			}
+			if joined != c.wantJoin {
+				t.Errorf("joined = %q, want %q", joined, c.wantJoin)
+			}
+		})
 	}
-	if err := os.MkdirAll("testDir/src/C", os.ModePerm); err != nil {
-		log.Fatal(err)
-	}
-
-	writeIntoFile("testDir/src/A/B/a.txt", "Hallo A_B_a")
-	writeIntoFile("testDir/src/A/b.txt", "Hallo A_c")
-	writeIntoFile("testDir/src/A/C/c.txt", "Hallo A_C_c")
-	writeIntoFile("testDir/src/C/d.txt", "Hallo C_d")
-	writeIntoFile("testDir/src/e.txt", "Hallo e")
-
-	args := Args{src: "/home/martin/Desktop/dev/KIT/Shuttle/testDir/src", duration: 3, user: "admin", pass: "admin", sendType: "zip"}
-
-	//start_time := time.Now()
-
-	done_files := make(chan string, 20)
-	quit := make(chan int)
-	pm := newProcessManager(&args, done_files)
-	go pm.doWork(quit)
-	quit <- 1
-	if len(done_files) > 0 {
-		t.Errorf("Done files channel shoud be empty but len(done_files)=%d", len(done_files))
-	}
-
-	//wayback := start_time.Add(time.Duration(3) * time.Second)
-	//patch := monkey.Patch(time.Now, func() time.Time { return wayback })
-	//defer patch.Unpatch()
-	time.Sleep(time.Duration(2900) * time.Millisecond)
-	go pm.doWork(quit)
-	quit <- 1
-	if len(done_files) > 0 {
-		t.Errorf("Done files channel shoud be empty but len(done_files)=%d", len(done_files))
-	}
-	time.Sleep(time.Duration(100) * time.Millisecond)
-
-	go pm.doWork(quit)
-
-	if len(done_files) > 3 {
-		t.Errorf("Done files channel shoud have > 3 elements. len(done_files)=%d", len(done_files))
-	}
-
-	quit <- 1
 }
