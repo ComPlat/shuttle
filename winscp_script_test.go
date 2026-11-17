@@ -106,3 +106,19 @@ func TestWinscpPasswordOnlyInOpenLine(t *testing.T) {
 		}
 	}
 }
+
+func TestRedactSecrets(t *testing.T) {
+	pass := "p@ss:w/rd%1"
+	out := "Error opening sftp://lab:" + strings.TrimPrefix(url.UserPassword("", pass).String(), ":") +
+		"@host:22/ (raw " + pass + ")"
+	got := redactSecrets(out, pass, "")
+	if strings.Contains(got, pass) || strings.Contains(got, "p%40ss") {
+		t.Errorf("password left in output: %q", got)
+	}
+	if !strings.Contains(got, "sftp://lab:***@host:22/") || !strings.Contains(got, "(raw ***)") {
+		t.Errorf("unexpected redaction result: %q", got)
+	}
+	if redactSecrets("plain output", "") != "plain output" {
+		t.Error("an empty secret must not change the output")
+	}
+}

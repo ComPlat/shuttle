@@ -40,7 +40,7 @@ func winscpPath() (string, error) {
 // WinSCP on it and removes it. The script holds the password and is never
 // logged. The exit code of WinSCP is the success signal: with
 // "option batch abort" it is non-zero if any command (e.g. put) fails.
-func runWinscp(lines []string) (string, error) {
+func runWinscp(lines []string, secrets ...string) (string, error) {
 	winscp, err := winscpPath()
 	if err != nil {
 		return "", err
@@ -64,7 +64,7 @@ func runWinscp(lines []string) (string, error) {
 	cmd := exec.Command(winscp, "/script="+filepath.Base(name))
 	cmd.Dir = filepath.Dir(name)
 	out, err := cmd.CombinedOutput()
-	output := string(out)
+	output := redactSecrets(string(out), secrets...)
 	if err != nil {
 		tail := output
 		if len(tail) > maxWinscpOutputTail {
@@ -103,7 +103,7 @@ func (m *TransferManagerSftp) session() winscpSession {
 // connect_to_server runs a check script, so a missing WinSCP or a bad host key
 // fails early.
 func (m *TransferManagerSftp) connect_to_server() error {
-	_, err := runWinscp(winscpCheckScript(m.session()))
+	_, err := runWinscp(winscpCheckScript(m.session()), m.pass)
 	return err
 }
 
@@ -115,6 +115,6 @@ func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, erro
 	}
 	InfoLogger.Println("Sending...", remote)
 
-	_, err := runWinscp(winscpUploadScript(m.session(), localPath, remote))
+	_, err := runWinscp(winscpUploadScript(m.session(), localPath, remote), m.pass)
 	return err == nil, err
 }

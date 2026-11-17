@@ -85,3 +85,23 @@ func winscpUploadScript(s winscpSession, localPath, remotePath string) []string 
 func winscpCheckScript(s winscpSession) []string {
 	return append(winscpHeader(s), "exit")
 }
+
+// redactSecrets removes every secret from s, both as given and in the
+// URL-escaped form used in the session URL. WinSCP output can quote the
+// session, so its output must pass through this before it is logged.
+func redactSecrets(s string, secrets ...string) string {
+	for _, secret := range secrets {
+		if secret == "" {
+			continue
+		}
+		forms := []string{secret}
+		// url.UserPassword("", p).String() is ":" + escaped p.
+		if escaped := strings.TrimPrefix(url.UserPassword("", secret).String(), ":"); escaped != secret {
+			forms = append(forms, escaped)
+		}
+		for _, f := range forms {
+			s = strings.Replace(s, f, "***", -1)
+		}
+	}
+	return s
+}
