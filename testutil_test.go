@@ -62,21 +62,27 @@ func setAge(t *testing.T, path string, age time.Duration) {
 }
 
 // useTempGlobals points every working-directory global (TempPath,
-// PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath, LogPath)
+// PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath,
+// IncomingPath, ArchivePath, FlatTarOutPath, LogPath)
 // at fresh subdirectories of a temp dir, so no test touches ~/shuttle.
 // The returned function restores the old values and removes the temp dir.
 func useTempGlobals(t *testing.T) (string, func()) {
 	t.Helper()
 	root, cleanup := newTempDir(t)
-	old := []string{TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath, LogPath}
+	old := []string{TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath,
+		IncomingPath, ArchivePath, FlatTarOutPath, LogPath}
 
 	TempPath = filepath.Join(root, "shuttle_temp")
 	PreTempPath = filepath.Join(root, "shuttle_pre_temp")
 	FlatTarTempPath = filepath.Join(root, "shuttle_flat_tar_temp")
 	TempConvertedPath = filepath.Join(root, "shuttle_converted_temp")
 	PreScriptPath = filepath.Join(root, "scripts")
+	IncomingPath = filepath.Join(root, "shuttle_incoming")
+	ArchivePath = filepath.Join(root, "shuttle_archive_temp")
+	FlatTarOutPath = filepath.Join(root, "shuttle_flat_tar_out")
 	LogPath = filepath.Join(root, "shuttle_log.txt")
-	for _, p := range []string{TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath} {
+	for _, p := range []string{TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath,
+		IncomingPath, ArchivePath, FlatTarOutPath} {
 		if err := os.MkdirAll(p, 0755); err != nil {
 			cleanup()
 			t.Fatal(err)
@@ -84,8 +90,8 @@ func useTempGlobals(t *testing.T) (string, func()) {
 	}
 
 	return root, func() {
-		TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath, LogPath =
-			old[0], old[1], old[2], old[3], old[4], old[5]
+		TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath = old[0], old[1], old[2], old[3], old[4]
+		IncomingPath, ArchivePath, FlatTarOutPath, LogPath = old[5], old[6], old[7], old[8]
 		cleanup()
 	}
 }

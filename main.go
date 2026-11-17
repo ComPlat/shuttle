@@ -24,6 +24,16 @@ var (
 	PreTempPath       string
 	FlatTarTempPath   string
 	PreScriptPath     string
+	// IncomingPath is the staging folder for the hand-over into TempPath:
+	// entries are copied here first and then renamed into TempPath, so the
+	// transfer managers never see a half-copied file (WP 3.4).
+	IncomingPath string
+	// ArchivePath holds zip/tar archives built by the transfer managers,
+	// outside the folder they scan (WP 3.2).
+	ArchivePath string
+	// FlatTarOutPath holds finished flat_tar archives, outside
+	// FlatTarTempPath, so they are never archived again (WP 3.7).
+	FlatTarOutPath string
 )
 
 // init initializes the logger and parses CMD args.
@@ -42,11 +52,14 @@ func initTool() {
 	TempConvertedPath = path.Join(shuttleFolderName, "shuttle_converted_temp")
 	PreTempPath = path.Join(shuttleFolderName, "shuttle_pre_temp")
 	FlatTarTempPath = path.Join(shuttleFolderName, "shuttle_flat_tar_temp")
+	IncomingPath = path.Join(shuttleFolderName, "shuttle_incoming")
+	ArchivePath = path.Join(shuttleFolderName, "shuttle_archive_temp")
+	FlatTarOutPath = path.Join(shuttleFolderName, "shuttle_flat_tar_out")
 	PreScriptPath = path.Join(mainShuttleFolderName, "scripts")
 
-	newPaths := []string{TempPath, PreTempPath, PreScriptPath}
+	newPaths := []string{TempPath, PreTempPath, PreScriptPath, IncomingPath, ArchivePath}
 	if args.sendType == "flat_tar" {
-		newPaths = append(newPaths, FlatTarTempPath)
+		newPaths = append(newPaths, FlatTarTempPath, FlatTarOutPath)
 	}
 	if args.preconvert {
 		newPaths = append(newPaths, TempConvertedPath)
