@@ -19,7 +19,7 @@ func TestFlatTarPrefixes(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^(\w)_`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 
 	pm.collectTarPrefixes()
 	if len(pm.doneFlatPrefixes) != 2 {
@@ -91,7 +91,7 @@ func runSpecialGroupName(t *testing.T, fileName, regex, key string, groups []str
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(regex), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 	if res, _ := pm.applyRegex(fileName); !AreEqual(res, groups) {
 		t.Fatalf("fixture: applyRegex(%q) = %q, want %q", fileName, res, groups)
 	}
@@ -153,7 +153,7 @@ func TestProcessTarPrefixesTarFailureKeepsSources(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^(\w)_`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 	pm.collectTarPrefixes()
 	pm.processTarPrefixes()
 
@@ -182,7 +182,7 @@ func TestProcessTarPrefixesKeepsPendingTar(t *testing.T) {
 
 	doneFiles := make(chan string, 10)
 	a := &Args{commonRegex: regexp.MustCompile(`^(\w)_`), sendType: "flat_tar"}
-	pm := newProcessManager(a, doneFiles)
+	pm := newProcessManager(a, doneFiles, nil)
 	pm.collectTarPrefixes()
 	pm.processTarPrefixes()
 

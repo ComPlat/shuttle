@@ -4,19 +4,21 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
 
 // ProcessManager manges the file watching process.
-// As soon as all files in a subdirectory of <CMD arg -src>
-// (or a file directly in <CMD arg -src>) are
-// not changed for almost exactly <CMD -duration> seconds,
-// the subdirectory will be pushed into the channel 'done_files'.
+// A file in <CMD arg -src> (or a root subdirectory, for folder/zip/tar) is
+// pushed into the channel 'done_files' when it is stable (not modified for
+// <CMD -duration>), not locked and not yet in the sent register with the same
+// mtime and size.
 type ProcessManager struct {
 	args             *Args
 	doneFiles        chan string
 	doneFlatPrefixes map[string][]string
+	register         *SentRegister
 }
 
 func (m ProcessManager) applyRegex(name string) ([]string, string) {
@@ -140,93 +142,130 @@ func (m ProcessManager) isFileLocked(path string) bool {
 	return fileLockedFn(path)
 }
 
-// scanReady walks <CMD arg -src> once and returns, per file or root folder, whether it is
-// ready to be sent (true) or was modified within the last <duration> (false).
-func (m ProcessManager) scanReady(now time.Time, lockedFiles map[string]struct{}) (map[string]bool, error) {
-	doneFolders := make(map[string]bool)
-	// Checking all files in <CMD arg -src>.
+// readyFile is a file that belongs to a ready key, as seen by the scan.
+type readyFile struct {
+	rel  string // "/"-separated, relative to -src
+	info os.FileInfo
+}
+
+// scanGroup collects the state of one key during the scan.
+type scanGroup struct {
+	files   []readyFile
+	changed bool
+	blocked bool // an unstable or locked file holds the group back
+}
+
+// scanReady walks -src once. It returns the ready keys (file rel paths, or
+// root folders for folder/zip/tar) with all files that belong to them, and
+// the set of all file keys it saw. Only an error at the -src root is returned;
+// errors on single entries are logged and the entry is skipped.
+func (m ProcessManager) scanReady(now time.Time) (map[string][]readyFile, map[string]bool, error) {
+	perFile := m.args.sendType == "file" || m.args.sendType == "flat_tar"
+	groups := make(map[string]*scanGroup)
+	seen := make(map[string]bool)
 	err := filepath.Walk(m.args.src,
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
-				return err
-			}
-			if !info.IsDir() {
-				modified := info.ModTime()
-				diff := now.Sub(modified)
-				if m.isFileLocked(path) {
-					lockedFiles[path] = struct{}{}
-					// A locked file holds back its whole root folder.
-					if m.args.sendType != "file" && m.args.sendType != "flat_tar" {
-						if relPath, err := filepath.Rel(m.args.src, path); err == nil {
-							doneFolders[getRootDir(relPath)] = false
-						} else {
-							ErrorLogger.Println(err)
-						}
-					}
-				} else if _, exists := lockedFiles[path]; exists || diff < 2*m.args.duration {
-					if exists {
-						delete(lockedFiles, path)
-					}
-					if relPath, err := filepath.Rel(m.args.src, path); err == nil {
-						folder := relPath
-						if m.args.sendType != "file" && m.args.sendType != "flat_tar" {
-							folder = getRootDir(relPath)
-						}
-
-						if _, ok := doneFolders[folder]; !ok {
-							doneFolders[folder] = true
-						}
-
-						if diff <= m.args.duration {
-							doneFolders[folder] = false
-						}
-					} else {
-						ErrorLogger.Println(err)
-					}
+				if path == m.args.src {
+					return err
 				}
+				ErrorLogger.Println(err)
+				return nil
+			}
+			if info == nil || info.IsDir() {
+				return nil
+			}
+			relPath, err := filepath.Rel(m.args.src, path)
+			if err != nil {
+				ErrorLogger.Println(err)
+				return nil
+			}
+			rel := filepath.ToSlash(relPath)
+			seen[rel] = true
+			key := rel
+			if !perFile {
+				key = getRootDir(relPath)
+			}
+			g := groups[key]
+			if g == nil {
+				g = &scanGroup{}
+				groups[key] = g
+			}
+			g.files = append(g.files, readyFile{rel: rel, info: info})
+			changed := !m.register.Unchanged(rel, info)
+			if changed {
+				g.changed = true
+			}
+			if perFile && !changed {
+				return nil
+			}
+			if now.Sub(info.ModTime()) <= m.args.duration || m.isFileLocked(path) {
+				g.blocked = true
 			}
 			return nil
 		})
-	return doneFolders, err
+	if err != nil {
+		return map[string][]readyFile{}, seen, err
+	}
+	ready := make(map[string][]readyFile)
+	for key, g := range groups {
+		if g.changed && !g.blocked {
+			ready[key] = g.files
+		}
+	}
+	return ready, seen, nil
 }
 
 // doWork runs in an endless loop. It watches the files in the <CMD arg -src> directory.
 // It terminates as soon as a value is pushed into quit. Run in extra goroutine.
 func (m ProcessManager) doWork(quit chan int) {
 	InfoLogger.Println("Started watch process.")
-	lockedFiles := make(map[string]struct{})
 	for {
 		select {
 		case <-quit:
 			return
 		default:
 			now := time.Now()
-			doneFolders, err := m.scanReady(now, lockedFiles)
+			ready, seen, err := m.scanReady(now)
 
 			if err != nil {
 				ErrorLogger.Println(err)
 			}
 
-			// Pushing all complete subdirectory into done_files channel.
 			if m.args.sendType == "flat_tar" {
 				m.collectTarPrefixes()
 			}
 
-			for k, v := range doneFolders {
-				if v {
-					InfoLogger.Println("Folder/File ready to send: ", k)
-					if m.args.sendType == "flat_tar" {
-						src := filepath.Join(m.args.src, k)
-						base := filepath.Base(k)
-						dst := filepath.Join(FlatTarTempPath, uniqueName(FlatTarTempPath, base))
-						err := Copy(src, dst)
-						if err != nil {
-							ErrorLogger.Println(err)
-						}
-					} else {
-						m.doneFiles <- filepath.Join(m.args.src, k)
+			keys := make([]string, 0, len(ready))
+			for k := range ready {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, k := range keys {
+				InfoLogger.Println("Folder/File ready to send: ", k)
+				srcPath := filepath.Join(m.args.src, filepath.FromSlash(k))
+				if m.args.sendType == "flat_tar" {
+					base := filepath.Base(srcPath)
+					dst := filepath.Join(FlatTarTempPath, uniqueName(FlatTarTempPath, base))
+					if err := Copy(srcPath, dst); err != nil {
+						// Not recorded: the next pass retries.
+						ErrorLogger.Println(err)
+						continue
 					}
+				} else {
+					m.doneFiles <- srcPath
 				}
+				for _, f := range ready[k] {
+					m.register.Record(f.rel, f.info)
+				}
+			}
+			// A failed scan of the root (e.g. a network drive that is gone)
+			// must not wipe the register.
+			if err == nil {
+				m.register.Prune(seen)
+			}
+			if err := m.register.Save(); err != nil {
+				ErrorLogger.Println("saving sent register: ", err)
 			}
 			if m.args.sendType == "flat_tar" {
 				m.processTarPrefixes()
@@ -238,6 +277,10 @@ func (m ProcessManager) doWork(quit chan int) {
 }
 
 // newProcessManager factory for ProcessManager struct
-func newProcessManager(args *Args, doneFiles chan string) ProcessManager {
-	return ProcessManager{args: args, doneFiles: doneFiles, doneFlatPrefixes: make(map[string][]string)}
+// A nil register gives an empty in-memory one.
+func newProcessManager(args *Args, doneFiles chan string, register *SentRegister) ProcessManager {
+	if register == nil {
+		register = newSentRegister()
+	}
+	return ProcessManager{args: args, doneFiles: doneFiles, doneFlatPrefixes: make(map[string][]string), register: register}
 }
