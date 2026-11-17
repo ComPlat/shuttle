@@ -29,43 +29,54 @@ func (m *PrepareManager) doWork(quit chan int) {
 			InfoLogger.Println("Quit transfer process.")
 			return
 		case to_send := <-m.done_files:
-			_, err := os.Stat(to_send)
-			if err != nil {
-				ErrorLogger.Println(err)
-				break
-			}
-			tempPath, err := CopyPreTempDirectory(to_send)
-			if m.args.sendType == "flat_tar" {
-				err := os.Remove(to_send)
-				if err != nil {
-					ErrorLogger.Println(err)
-				}
-			}
-			if err != nil {
-				ErrorLogger.Println(err)
-			}
-
-			RunPreScripts(tempPath)
-			if args.preconvert {
-				RunConverterScripts(tempPath)
-				filePath := tempPath + ".zip"
-				fileName := filepath.Base(filePath)
-				err := AddLinkToZip(filepath.Base(filePath), filePath)
-				if err != nil {
-					ErrorLogger.Println(err)
-				}
-				err = os.Rename(filePath, path.Join(TempConvertedPath, fileName))
-				if err != nil {
-					ErrorLogger.Println(err)
-				}
-			}
-			err = CopyTempDirectory()
-			if err != nil {
-				log.Fatal(err)
-			}
-
+			// Errors are logged inside prepareOne; the next item is handled regardless.
+			_ = m.prepareOne(to_send)
 		}
 	}
+}
+
+// prepareOne copies one finished item into PreTempPath, runs the scripts
+// and hands the result over to TempPath. If the copy into PreTempPath fails,
+// the source is left untouched and no script runs.
+func (m *PrepareManager) prepareOne(toSend string) error {
+	_, err := os.Stat(toSend)
+	if err != nil {
+		ErrorLogger.Println(err)
+		return err
+	}
+	tempPath, err := CopyPreTempDirectory(toSend)
+	if err != nil {
+		ErrorLogger.Println(err)
+		// Do not leave a partial copy behind: the next hand-over would pass it on.
+		_ = os.RemoveAll(tempPath)
+		return err
+	}
+	if m.args.sendType == "flat_tar" {
+		// The tar was copied completely, so the original is no longer needed.
+		if err := os.Remove(toSend); err != nil {
+			ErrorLogger.Println(err)
+		}
+	}
+
+	RunPreScripts(tempPath)
+	if args.preconvert {
+		RunConverterScripts(tempPath)
+		filePath := tempPath + ".zip"
+		fileName := filepath.Base(filePath)
+		err := AddLinkToZip(filepath.Base(filePath), filePath)
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+		err = os.Rename(filePath, path.Join(TempConvertedPath, fileName))
+		if err != nil {
+			ErrorLogger.Println(err)
+		}
+	}
+	err = CopyTempDirectory()
+	if err != nil {
+		log.Fatal(err)
+	}
+	return nil
 }
 
 func newPrepareManager(args *Args, done_files chan string) PrepareManager {

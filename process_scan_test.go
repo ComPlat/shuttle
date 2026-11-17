@@ -165,8 +165,6 @@ func TestScanReadyLockedFile(t *testing.T) {
 }
 
 func TestScanReadyLockedFileInFolder(t *testing.T) {
-	t.Skip("known bug, fixed in WP 3.5: a locked file inside a folder is skipped, so the folder is reported ready")
-
 	src, cleanup := newTempDir(t)
 	defer cleanup()
 	a := filepath.Join(src, "A", "a.txt")
