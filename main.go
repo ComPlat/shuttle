@@ -3,13 +3,13 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/user"
-	"path"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -38,6 +38,35 @@ var (
 	FlatTarOutPath string
 )
 
+// instanceDirName returns the instance name as used in the folder name
+// shuttle_<name>. On Windows the name is cleaned with safeDirName, because
+// characters such as : or a trailing dot make MkdirAll fail. Elsewhere it is
+// returned unchanged: changing it would move an existing install to a new
+// folder with an empty sent register and cause a full re-upload.
+func instanceDirName(name string) string {
+	if runtime.GOOS == "windows" {
+		return safeDirName(name)
+	}
+	return name
+}
+
+// setupPaths sets every working-folder global for home directory home and
+// instance name name. It creates no folders.
+func setupPaths(home, name string) {
+	mainShuttleFolderName := filepath.Join(home, "shuttle")
+	shuttleFolderName := filepath.Join(mainShuttleFolderName, "shuttle_"+instanceDirName(name))
+	TempPath = filepath.Join(shuttleFolderName, "shuttle_temp")
+	TempConvertedPath = filepath.Join(shuttleFolderName, "shuttle_converted_temp")
+	PreTempPath = filepath.Join(shuttleFolderName, "shuttle_pre_temp")
+	FlatTarTempPath = filepath.Join(shuttleFolderName, "shuttle_flat_tar_temp")
+	IncomingPath = filepath.Join(shuttleFolderName, "shuttle_incoming")
+	ArchivePath = filepath.Join(shuttleFolderName, "shuttle_archive_temp")
+	FlatTarOutPath = filepath.Join(shuttleFolderName, "shuttle_flat_tar_out")
+	RegisterPath = filepath.Join(shuttleFolderName, "sent_register.json")
+	PreScriptPath = filepath.Join(mainShuttleFolderName, "scripts")
+	LogPath = filepath.Join(shuttleFolderName, "shuttle_log.txt")
+}
+
 // init initializes the logger and parses CMD args.
 func initTool() {
 	args = GetCmdArgs()
@@ -46,19 +75,7 @@ func initTool() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	wd := usr.HomeDir
-	shuttleFolderName := fmt.Sprintf("shuttle_%s", args.name)
-	mainShuttleFolderName := path.Join(wd, "shuttle")
-	shuttleFolderName = path.Join(mainShuttleFolderName, shuttleFolderName)
-	TempPath = path.Join(shuttleFolderName, "shuttle_temp")
-	TempConvertedPath = path.Join(shuttleFolderName, "shuttle_converted_temp")
-	PreTempPath = path.Join(shuttleFolderName, "shuttle_pre_temp")
-	FlatTarTempPath = path.Join(shuttleFolderName, "shuttle_flat_tar_temp")
-	IncomingPath = path.Join(shuttleFolderName, "shuttle_incoming")
-	ArchivePath = path.Join(shuttleFolderName, "shuttle_archive_temp")
-	FlatTarOutPath = path.Join(shuttleFolderName, "shuttle_flat_tar_out")
-	RegisterPath = path.Join(shuttleFolderName, "sent_register.json")
-	PreScriptPath = path.Join(mainShuttleFolderName, "scripts")
+	setupPaths(usr.HomeDir, args.name)
 
 	newPaths := []string{TempPath, PreTempPath, PreScriptPath, IncomingPath, ArchivePath}
 	if args.sendType == "flat_tar" {
@@ -73,8 +90,6 @@ func initTool() {
 			panic("")
 		}
 	}
-
-	LogPath = path.Join(shuttleFolderName, "shuttle_log.txt")
 
 	logFile, err := os.OpenFile(LogPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
 	if err != nil {

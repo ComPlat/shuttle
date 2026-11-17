@@ -115,9 +115,6 @@ func TestTarFolder(t *testing.T) {
 }
 
 func TestArchiveEntryNamesUseSlash(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("known bug, fixed in WP 4.1: zipFolder/tarFolder write backslash entry names on Windows")
-	}
 	root, cleanup := newTempDir(t)
 	defer cleanup()
 	a := utilsArchiveFixture(t, root)
@@ -264,25 +261,7 @@ func TestAreEqual(t *testing.T) {
 	}
 }
 
-// utilsSkipIfZipRewriteUnsupported skips when AddFileToZip cannot be tested
-// on this platform or filesystem layout.
-func utilsSkipIfZipRewriteUnsupported(t *testing.T, err error) {
-	t.Helper()
-	if err == nil {
-		return
-	}
-	if runtime.GOOS == "windows" {
-		t.Skipf("known bug, fixed in WP 4.2: AddFileToZip renames over an open file on Windows: %v", err)
-	}
-	if le, ok := err.(*os.LinkError); ok && le.Op == "rename" {
-		t.Skipf("known bug, fixed in WP 4.2: AddFileToZip renames across filesystems (EXDEV): %v", err)
-	}
-}
-
 func TestAddFileToZip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("known bug, fixed in WP 4.2: AddFileToZip renames over an open file on Windows")
-	}
 	root, cleanup := newTempDir(t)
 	defer cleanup()
 	a := utilsArchiveFixture(t, root)
@@ -294,7 +273,6 @@ func TestAddFileToZip(t *testing.T) {
 	writeTestFile(t, extra, "extra content")
 
 	err = AddFileToZip(zp, extra, "added.txt")
-	utilsSkipIfZipRewriteUnsupported(t, err)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,9 +283,6 @@ func TestAddFileToZip(t *testing.T) {
 }
 
 func TestAddLinkToZip(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("known bug, fixed in WP 4.2: AddFileToZip renames over an open file on Windows")
-	}
 	oldPublic := args.public
 	defer func() { args.public = oldPublic }()
 	args.public = "https://example.org/pub/"
@@ -321,7 +296,6 @@ func TestAddLinkToZip(t *testing.T) {
 	}
 
 	err = AddLinkToZip(filepath.Join(root, "dir", "file.bin"), zp)
-	utilsSkipIfZipRewriteUnsupported(t, err)
 	if err != nil {
 		t.Fatal(err)
 	}

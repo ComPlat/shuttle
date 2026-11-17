@@ -3,7 +3,6 @@ package main
 import (
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"time"
 )
@@ -93,7 +92,7 @@ func (m *PrepareManager) prepareOne(toSend string) error {
 		if err != nil {
 			ErrorLogger.Println(err)
 		}
-		err = os.Rename(filePath, path.Join(TempConvertedPath, fileName))
+		err = os.Rename(filePath, filepath.Join(TempConvertedPath, fileName))
 		if err != nil {
 			ErrorLogger.Println(err)
 		}
