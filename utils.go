@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"io"
-	"io/fs"
 	"log"
 	"os"
 	"os/exec"
@@ -74,7 +73,7 @@ func RunConverterScripts(srcFilePath string) {
 
 }
 
-func runScript(file fs.FileInfo, cwd string, args ...string) {
+func runScript(file os.FileInfo, cwd string, args ...string) {
 	if !file.IsDir() && strings.Contains(".exe.sh.fish", filepath.Ext(file.Name())) {
 		var (
 			cmd *exec.Cmd
@@ -339,7 +338,7 @@ func tarFolder(path_src string) (string, error) {
 
 func AddLinkToZip(file, zipPath string) error {
 	// 1️⃣ create temp file
-	tmp, err := os.CreateTemp("", "link.txt")
+	tmp, err := CreateTempCompat("", "link-")
 	if err != nil {
 		return err
 	}
@@ -380,7 +379,7 @@ func AddFileToZip(zipPath, filePath, fileName string) error {
 	}(r)
 
 	// Create temp zip
-	tmpFile, err := os.CreateTemp("", "ziptmp-*.zip")
+	tmpFile, err := CreateTempCompat("", "ziptmp-")
 	if err != nil {
 		return err
 	}
