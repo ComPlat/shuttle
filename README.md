@@ -1,5 +1,5 @@
 # Shuttle
-**Version 1.12**
+**Version 1.13**
 
 This project has been migrated from [ELN_file_watcher](https://github.com/ComPlat/ELN_file_watcher).
 
@@ -14,8 +14,10 @@ Shuttle is a utility that facilitates seamless file transfer from a source devic
    - Detailed setup instructions are available in the ShuttleBuilder repository.
 
 2. **Manual Compilation**
-   - If you prefer not to use ShuttleBuilder, compile Shuttle using Go version `1.23`.
+   - If you prefer not to use ShuttleBuilder, compile Shuttle with Go `1.24` or newer (`go build`), for example `GOOS=windows GOARCH=amd64 go build` for Windows 10/11.
+   - For Windows XP use `bash dev/build_xp.sh [repo_dir] [out_dir]` (needs Docker): it builds `shuttle.exe` with Go 1.10.8 exactly like ShuttleBuilder does.
    - Copy the executable to your source device and follow the **Usage** section for configuration.
+   - `shuttle -version` prints the version.
 
 
 
@@ -45,7 +47,9 @@ shuttle -src < source_directory_path > -duration < time_in_seconds > -dst < dest
 
 - < source_directory_path >: Path to the source directory containing files to transfer.
 - < time_in_seconds >: Time threshold (in seconds) for determining if a file is ready for transfer (unchanged for the specified duration).
-- < destination_server >: URL of the WebDAV/SFTP server.
+- < destination_server >: the destination.
+  - WebDAV: a full URL, `https://server/path/` (or `http://`).
+  - SFTP: `host:port/path`, `ssh://host:port/path` or `sftp://host:port/path`; the port defaults to 22.
 - < username >: Username for authentication.
 - < password >: Password for authentication.
 - Transfer Type (-type):
@@ -60,6 +64,16 @@ If using flat_tar, provide a regular expression (< Regexp >) to group related fi
 Transfer Protocol (-transfer):
 - webdav: Use WebDAV protocol.
 - sftp: Use SFTP protocol.
+
+Further options: `-name` (instance name, used for the working folder `~/shuttle/shuttle_<name>`), `-crt`, `-hostkey`, `-insecure` (see *Security*), and `-preconvert 1` with `-dstConverter`, `-userConverter`, `-passConverter` and `-public` to convert files with `ChemConverterApp` and send the converted files to a second destination.
+
+### Running and stopping
+
+- At startup Shuttle checks its setup and stops with a clear message if something can never work: invalid arguments, an unreadable `~/shuttle/scripts` folder, or a missing `ChemConverterApp` when `-preconvert` is set.
+- Network problems are never fatal: if the server cannot be reached (also at startup, e.g. when the PC boots before the network is up), the error is logged and the upload is retried with increasing waits.
+- A failing script or converter at runtime is logged; the conversion is skipped, the raw data is still sent.
+- Connections are kept open between uploads and re-established after an error. WebDAV uploads are streamed, so large files do not need to fit into memory.
+- `Ctrl+C` or `SIGTERM` stops Shuttle cleanly. Files not yet sent stay in the working folder and are sent after the next start.
 
 ### Preprocess Scripts
 
@@ -111,6 +125,17 @@ Before running Shuttle, configure the following:
 - File modification duration threshold.
 - User credentials for authentication.
 - Transfer type and protocol.
+
+## Changelog
+
+### 1.13
+- **No lost or duplicated uploads:** a local file is deleted only after a confirmed upload (WebDAV errors used to count as success); every zip/tar is uploaded once (was twice); files are handed over to the uploader atomically; flat_tar no longer deletes sources before a successful copy.
+- **Sent register** (`sent_register.json`) replaces the timing window: files can no longer be skipped silently. **The first start after the update sends every stable file in `-src` once.**
+- **Windows:** correct `/` entry names in zip/tar, working `-preconvert`, instance names with special characters, clear script rules.
+- **Windows XP (SFTP):** WinSCP is driven by a script file: paths with spaces, special characters in passwords and nested folders work; failures are logged (password removed). *Not yet tested on a real XP machine.*
+- **Security:** WebDAV certificates are verified (`-crt`, `-insecure`); SSH host keys are pinned (`-hostkey`) or trusted on first use (`known_hosts`); updated SSH library (x/crypto v0.48.0).
+- **Robustness:** network errors at startup are retried instead of stopping Shuttle; no crash on runtime errors; WebDAV uploads are no longer cut off after 10 seconds; streamed uploads; connection reuse; `host:port/path` works as SFTP destination; `-version`.
+- Tests and CI for Linux, Windows 10/11 and Windows XP builds.
 
 ## Contributing
 
