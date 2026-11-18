@@ -5,6 +5,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -30,6 +31,46 @@ type TransferManager interface {
 	// remoteRel is relative and "/"-separated, without a leading "/".
 	// It returns true only if the upload is confirmed complete.
 	send_file(localPath, remoteRel string) (bool, error)
+}
+
+// folderSender is implemented by transports that can send a whole folder as
+// one request.
+type folderSender interface {
+	send_folder(srcDir, folder string, files []string) (bool, error) // files: absolute paths of regular files
+}
+
+// sendWholeFolder sends all regular files of folder with one request and
+// removes the folder only after success. It returns false on failure.
+func sendWholeFolder(fs folderSender, srcDir, folder string) bool {
+	var files []string
+	err := filepath.Walk(folder, func(p string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		if info.Mode().IsRegular() {
+			files = append(files, p)
+		}
+		return nil
+	})
+	if err != nil {
+		ErrorLogger.Println(err)
+		return false
+	}
+	if len(files) > 0 {
+		sort.Strings(files)
+		ok, err := fs.send_folder(srcDir, folder, files)
+		if !ok {
+			if err == nil {
+				err = fmt.Errorf("sending %s was not confirmed", folder)
+			}
+			ErrorLogger.Println(err)
+			return false
+		}
+	}
+	if err := os.RemoveAll(folder); err != nil {
+		ErrorLogger.Println(err)
+	}
+	return true
 }
 
 // remoteRelPath returns the "/"-separated path of localPath relative to
@@ -191,6 +232,10 @@ func transferCycle(m TransferManager, srcDir, sendType string, itemPause time.Du
 			if !sendArchive(m, toSend, sendType) {
 				failed++
 			}
+		} else if fs, ok := m.(folderSender); ok && sendType == "folder" {
+			if !sendWholeFolder(fs, srcDir, toSend) {
+				failed++
+			}
 		} else {
 			failed += sendFolderFiles(m, srcDir, toSend, itemPause)
 		}
@@ -253,6 +298,8 @@ func newTransferManager(args *Args, dest *DestCredentials) TransferManager {
 		return &TransferManagerWebdav{DestCredentials: *dest, args: args}
 	} else if args.tType == "sftp" {
 		return &TransferManagerSftp{DestCredentials: *dest, args: args}
+	} else if args.tType == transferChemAssistent {
+		return &TransferManagerChemAssistent{DestCredentials: *dest, args: args}
 	}
 
 	panic("Transfer type is not implemented")

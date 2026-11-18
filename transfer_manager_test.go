@@ -264,3 +264,51 @@ func TestTransferCycleManyFilesNoPause(t *testing.T) {
 		t.Errorf("100 files took %v", d)
 	}
 }
+
+type fakeFolderTransfer struct {
+	fakeTransfer
+	folders [][]string
+	fail    bool
+}
+
+func (f *fakeFolderTransfer) send_folder(srcDir, folder string, files []string) (bool, error) {
+	f.folders = append(f.folders, files)
+	if f.fail {
+		return false, errors.New("scripted folder failure")
+	}
+	return true, nil
+}
+
+func TestTransferCycleFolderSender(t *testing.T) {
+	_, cleanup := useTempGlobals(t)
+	defer cleanup()
+	folder := makeFolder(t)
+	if err := os.MkdirAll(filepath.Join(TempPath, "empty", "sub"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	f := &fakeFolderTransfer{}
+	if n := transferCycle(f, TempPath, "folder", 0); n != 0 {
+		t.Fatalf("failures = %d", n)
+	}
+	if len(f.folders) != 1 || len(f.folders[0]) != 2 || len(f.calls) != 0 {
+		t.Fatalf("folders %v, per-file calls %d", f.folders, len(f.calls))
+	}
+	if exists(folder) || exists(filepath.Join(TempPath, "empty")) {
+		t.Error("folders not removed")
+	}
+
+	folder = makeFolder(t)
+	f = &fakeFolderTransfer{fail: true}
+	if n := transferCycle(f, TempPath, "folder", 0); n != 1 {
+		t.Fatalf("failures = %d, want 1", n)
+	}
+	if !exists(filepath.Join(folder, "B", "y.txt")) {
+		t.Error("folder removed after failure")
+	}
+
+	// other modes keep the per-file behaviour
+	f = &fakeFolderTransfer{}
+	if n := transferCycle(f, TempPath, "file", 0); n != 0 || len(f.folders) != 0 || len(f.calls) != 2 {
+		t.Errorf("file mode: failures %d, folders %d, calls %d", n, len(f.folders), len(f.calls))
+	}
+}
