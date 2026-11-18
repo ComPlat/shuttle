@@ -38,7 +38,7 @@ Shuttle is a utility that facilitates seamless file transfer from a source devic
 To run the utility, execute the following command:
 
 ```shell
-shuttle -src < source_directory_path > -duration < time_in_seconds > -dst < destination_server > -user < username > -pass < password > -type < file|folder|zip|tar|flat_tar > -transfer < webdav|sftp > -commonRegex < Regexp >
+shuttle -src < source_directory_path > -duration < time_in_seconds > -dst < destination_server > -user < username > -pass < password > -type < file|folder|zip|tar|flat_tar > -transfer < webdav|sftp > -commonRegex < Regexp > [-crt < cert.pem >] [-hostkey < fingerprint >] [-insecure 1]
 ```
 
 ### Parameters:
@@ -91,6 +91,17 @@ Shuttle remembers every file it has handed over for upload in `~/shuttle/shuttle
 - If `-src` is temporarily unreachable (e.g. a network drive), the register is kept unchanged.
 
 A local file is only deleted from Shuttle's working folders after its upload has been confirmed; failed uploads are retried with increasing waits (up to `-duration`).
+
+### Security: certificates and host keys
+
+**WebDAV (TLS).** Shuttle verifies the server certificate, using the system root certificates plus the optional `-crt` file (PEM). A missing or unreadable `-crt` file is logged as a warning. A server with a **self-signed certificate** needs `-crt` pointing to that certificate (or its CA); otherwise uploads fail until it is set. Files wait in Shuttle's working folders and are sent once the connection works. **Windows XP:** the XP build cannot read the Windows certificate store, so it verifies only when `-crt` is given; without `-crt` it does not verify and logs a warning at start.
+
+**SFTP (SSH host key).**
+- `-hostkey "<fingerprint>"` pins the server's key. Accepted forms: `SHA256:...`, WinSCP style `ssh-ed25519 255 SHA256:...`, or MD5 `aa:bb:...`. Any of the server's key types can be pinned.
+- Without `-hostkey`, the key seen on the first connection is trusted and stored in `~/shuttle/shuttle_<name>/known_hosts` (OpenSSH format). If the server later presents a different key, Shuttle refuses to connect and logs which key it saw. If the change is intended (e.g. a reinstalled server), delete the server's line from `known_hosts` or set `-hostkey`.
+- On Windows XP, `-hostkey` is passed to WinSCP; without it, WinSCP must already know the key (see *Windows XP Compatibility*).
+
+**`-insecure 1`** turns off both checks (TLS certificates and SSH host keys) and logs a warning. Use it only for testing.
 
 ## Configuration Checklist
 
