@@ -194,7 +194,9 @@ func transferCycle(m TransferManager, srcDir, sendType string, itemPause time.Du
 		} else {
 			failed += sendFolderFiles(m, srcDir, toSend, itemPause)
 		}
-		time.Sleep(itemPause)
+		if itemPause > 0 {
+			time.Sleep(itemPause)
+		}
 	}
 	return failed
 }
@@ -207,7 +209,7 @@ func doWorkImplementation(quit chan int, m TransferManager, srcDir string, sendT
 			return
 		default:
 		}
-		failed := transferCycle(m, srcDir, sendType, duration/2)
+		failed := transferCycle(m, srcDir, sendType, 0)
 		wait := duration / 2
 		if failed > 0 {
 			failedCycles++

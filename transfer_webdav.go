@@ -3,8 +3,10 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
 	"path"
-	"time"
 
 	"github.com/StarmanMartin/gowebdav"
 )
@@ -26,12 +28,46 @@ func (m *TransferManagerWebdav) doWork(quit chan int) {
 	doWorkImplementation(quit, m, m.srcDir, m.args.sendType, m.args.duration)
 }
 
-func (m *TransferManagerWebdav) connect_to_server() error {
-	user := m.user
-	password := m.pass
+// sizedBody is a request body of known size. http.NewRequest only sets
+// ContentLength for bytes/strings readers, so an *os.File would be sent
+// chunked, which some WebDAV servers reject. sizedTransport restores the
+// length. Close is a no-op: the caller owns the file.
+type sizedBody struct {
+	io.Reader
+	size int64
+}
 
-	c := gowebdav.NewClient(m.dst.String(), user, password, tr)
-	c.SetTimeout(10 * time.Second)
+func (b *sizedBody) Close() error { return nil }
+
+// sizedTransport sets ContentLength for requests whose body is a *sizedBody.
+type sizedTransport struct {
+	base http.RoundTripper
+}
+
+func (t *sizedTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	base := t.base
+	if base == nil {
+		base = http.DefaultTransport
+	}
+	if sb, ok := req.Body.(*sizedBody); ok {
+		// RoundTrippers must not modify the request: send a shallow copy.
+		r2 := *req
+		r2.ContentLength = sb.size
+		if sb.size == 0 {
+			r2.Body = http.NoBody
+		}
+		req = &r2
+	}
+	return base.RoundTrip(req)
+}
+
+// connect_to_server creates a fresh client and checks the server. The client
+// has no overall timeout (that would limit whole uploads); the transport
+// carries the connect, TLS and response-header timeouts.
+func (m *TransferManagerWebdav) connect_to_server() error {
+	m.client = nil
+	c := gowebdav.NewClient(m.dst.String(), m.user, m.pass, tr)
+	c.SetTransport(&sizedTransport{base: tr})
 	if err := c.Connect(); err != nil {
 		return err
 	}
@@ -40,6 +76,8 @@ func (m *TransferManagerWebdav) connect_to_server() error {
 }
 
 // send_file uploads localPath to <dst>/<remoteRel>. The client root is dst.
+// The client is reused; it is dropped after any error, so the next call
+// reconnects.
 func (m *TransferManagerWebdav) send_file(localPath, remoteRel string) (ok bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -47,10 +85,25 @@ func (m *TransferManagerWebdav) send_file(localPath, remoteRel string) (ok bool,
 			err = errors.New(fmt.Sprintf("%+v", r))
 			ErrorLogger.Printf("WebDav Panic: %s\n", err)
 		}
+		if !ok {
+			m.client = nil
+		}
 	}()
 
-	if err = m.connect_to_server(); err != nil {
+	f, err := os.Open(localPath)
+	if err != nil {
 		return false, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return false, err
+	}
+
+	if m.client == nil {
+		if err = m.connect_to_server(); err != nil {
+			return false, err
+		}
 	}
 	InfoLogger.Println("Sending...", remoteRel)
 
@@ -60,11 +113,6 @@ func (m *TransferManagerWebdav) send_file(localPath, remoteRel string) (ok bool,
 		}
 	}
 
-	bytes, err := ReadFileCompat(localPath)
-	if err != nil {
-		return false, err
-	}
-
-	err = m.client.Write(remoteRel, bytes, 0644)
+	err = m.client.WriteStream(remoteRel, &sizedBody{Reader: f, size: info.Size()}, 0644)
 	return err == nil, err
 }
