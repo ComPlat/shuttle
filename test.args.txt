@@ -1,8 +1,0 @@
--src "./test"
--name "Test instance"
--dst "192.168.56.103:220"
--user "martin"
--pass "Kokoa10!"
--duration 5
--type "file"
--transfer "sftp"
