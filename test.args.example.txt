@@ -1,0 +1,8 @@
+-src "./test"
+-name "Test instance"
+-dst "ssh://sftp.example.org:22/data"
+-user "<user>"
+-pass "<password>"
+-duration 5
+-type "file"
+-transfer "sftp"

@@ -70,7 +70,7 @@ func useTempGlobals(t *testing.T) (string, func()) {
 	t.Helper()
 	root, cleanup := newTempDir(t)
 	old := []string{TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath,
-		IncomingPath, ArchivePath, FlatTarOutPath, LogPath}
+		IncomingPath, ArchivePath, FlatTarOutPath, LogPath, KnownHostsPath}
 
 	TempPath = filepath.Join(root, "shuttle_temp")
 	PreTempPath = filepath.Join(root, "shuttle_pre_temp")
@@ -81,6 +81,7 @@ func useTempGlobals(t *testing.T) (string, func()) {
 	ArchivePath = filepath.Join(root, "shuttle_archive_temp")
 	FlatTarOutPath = filepath.Join(root, "shuttle_flat_tar_out")
 	LogPath = filepath.Join(root, "shuttle_log.txt")
+	KnownHostsPath = filepath.Join(root, "known_hosts")
 	for _, p := range []string{TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath,
 		IncomingPath, ArchivePath, FlatTarOutPath} {
 		if err := os.MkdirAll(p, 0755); err != nil {
@@ -92,6 +93,7 @@ func useTempGlobals(t *testing.T) (string, func()) {
 	return root, func() {
 		TempPath, PreTempPath, FlatTarTempPath, TempConvertedPath, PreScriptPath = old[0], old[1], old[2], old[3], old[4]
 		IncomingPath, ArchivePath, FlatTarOutPath, LogPath = old[5], old[6], old[7], old[8]
+		KnownHostsPath = old[9]
 		cleanup()
 	}
 }

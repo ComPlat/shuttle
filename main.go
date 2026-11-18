@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"io"
 	"log"
@@ -30,6 +29,9 @@ var (
 	IncomingPath string
 	// RegisterPath is the JSON file of the sent register (WP 3.9).
 	RegisterPath string
+	// KnownHostsPath stores SSH host keys trusted on first use (WP 6.2),
+	// in OpenSSH known_hosts format.
+	KnownHostsPath string
 	// ArchivePath holds zip/tar archives built by the transfer managers,
 	// outside the folder they scan (WP 3.2).
 	ArchivePath string
@@ -63,6 +65,7 @@ func setupPaths(home, name string) {
 	ArchivePath = filepath.Join(shuttleFolderName, "shuttle_archive_temp")
 	FlatTarOutPath = filepath.Join(shuttleFolderName, "shuttle_flat_tar_out")
 	RegisterPath = filepath.Join(shuttleFolderName, "sent_register.json")
+	KnownHostsPath = filepath.Join(shuttleFolderName, "known_hosts")
 	PreScriptPath = filepath.Join(mainShuttleFolderName, "scripts")
 	LogPath = filepath.Join(shuttleFolderName, "shuttle_log.txt")
 }
@@ -104,30 +107,11 @@ func initTool() {
 }
 
 func initArgs() {
-	isCert := len(args.crt) > 0
-
-	// Get the SystemCertPool, continue with an empty pool on error
-	rootCAs, _ := x509.SystemCertPool()
-	if rootCAs == nil {
-		rootCAs = x509.NewCertPool()
+	cfg, warnings := buildTLSConfig(unsetPlaceholder(args.crt), args.insecure, legacyTLSRoots, x509.SystemCertPool)
+	for _, w := range warnings {
+		ErrorLogger.Println("WARNING: " + w)
 	}
-	if isCert {
-		certs, err := ReadFileCompat(args.crt)
-		if err == nil {
-			if ok := rootCAs.AppendCertsFromPEM(certs); !ok {
-				ErrorLogger.Println("No certs appended, using system certs only")
-			}
-		}
-	}
-
-	// Trust the augmented cert pool in our client
-	config := &tls.Config{
-		InsecureSkipVerify: true,
-		RootCAs:            rootCAs,
-	}
-
-	tr = &http.Transport{TLSClientConfig: config}
-
+	tr = &http.Transport{TLSClientConfig: cfg}
 }
 
 // main starts the ELN file watcher. See README for more information.

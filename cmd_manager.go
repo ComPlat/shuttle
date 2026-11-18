@@ -24,6 +24,8 @@ type Args struct {
 	// hostKey is the expected SSH host key fingerprint of the SFTP server
 	// (-hostkey); empty means "not configured".
 	hostKey string
+	// insecure disables TLS certificate and SSH host key verification (-insecure).
+	insecure bool
 }
 
 func (m Args) LogString() string {
@@ -48,6 +50,7 @@ func GetCmdArgs() Args {
 	var duration int
 	var commonRegexStr string
 	var hostKey string
+	var insecureString string
 	var commonRegex *regexp.Regexp
 	var sendType string
 	var err error
@@ -73,6 +76,8 @@ func GetCmdArgs() Args {
 	flag.StringVar(&public, "public", "{{ public }}", "The prefix of the publicly accessible link to the raw files. It should end with an /. Only the file name is added to this prefix.")
 
 	flag.StringVar(&hostKey, "hostkey", "{{ hostkey }}", "SFTP only: expected SSH host key fingerprint of the server, e.g. 'ssh-ed25519 255 SHA256:...' (WinSCP format) or 'SHA256:...'.")
+
+	flag.StringVar(&insecureString, "insecure", "{{ insecure }}", "[True or 1] to skip TLS certificate and SSH host key verification. Only for testing or servers you cannot verify otherwise.")
 
 	flag.Parse()
 
@@ -141,7 +146,7 @@ func GetCmdArgs() Args {
 		duration: time.Duration(duration) * time.Second, sendType: sendType, tType: tType, name: name, commonRegex: commonRegex, preconvert: preconvert,
 		dstConverter: *dstConverterUrl, public: public,
 		userConverter: userConverter, passConverter: passConverter,
-		hostKey: unsetPlaceholder(hostKey)}
+		hostKey: unsetPlaceholder(hostKey), insecure: isTrue(unsetPlaceholder(insecureString))}
 
 }
 
@@ -155,4 +160,10 @@ func unsetPlaceholder(v string) string {
 		return ""
 	}
 	return v
+}
+
+// isTrue reports whether a flag value means "on" ("1", "true", "t"; any case).
+func isTrue(v string) bool {
+	v = strings.ToLower(strings.TrimSpace(v))
+	return v == "1" || v == "true" || v == "t"
 }

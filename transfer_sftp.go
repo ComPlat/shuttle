@@ -10,7 +10,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path"
 
@@ -26,6 +25,9 @@ type TransferManagerSftp struct {
 	DestCredentials
 	conn   *ssh.Client
 	client *sftp.Client
+	// pinAlgos caches the host key algorithms that matched a bare pinned
+	// fingerprint, so later connections need a single handshake.
+	pinAlgos []string
 }
 
 // doWork runs in a endless loop. It reacts on the channel done_files.
@@ -39,22 +41,59 @@ func (m *TransferManagerSftp) doWork(quit chan int) {
 func (m *TransferManagerSftp) connect_to_server() error {
 	user := m.user
 	password := m.pass
+	pinned, insecure := "", false
+	if m.args != nil {
+		pinned, insecure = m.args.hostKey, m.args.insecure
+	}
+	hostKeyCb, err := hostKeyCallback(pinned, insecure, KnownHostsPath)
+	if err != nil {
+		return err
+	}
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
 			ssh.Password(password),
 		},
-		HostKeyCallback: ssh.HostKeyCallback(func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }),
+		HostKeyCallback: hostKeyCb,
 	}
 
 	dst := m.dst.Host
+	// Candidate host key algorithm sets, tried in order. nil = client default.
+	candidates := [][]string{nil}
+	switch {
+	case insecure:
+	case pinned == "":
+		// Trust on first use: only negotiate key types already trusted for
+		// this host, so a different key type is never mistaken for a change.
+		if algos := knownHostKeyAlgorithms(KnownHostsPath, dst); len(algos) > 0 {
+			candidates = [][]string{algos}
+		}
+	case pinnedHostKeyAlgorithms(pinned) != nil:
+		candidates = [][]string{pinnedHostKeyAlgorithms(pinned)}
+	case m.pinAlgos != nil:
+		candidates = [][]string{m.pinAlgos}
+	default:
+		// A bare fingerprint does not say which key type it belongs to:
+		// try each type until the server presents the pinned key.
+		candidates = hostKeyAlgoGroups
+	}
 
 	if m.conn != nil {
 		_ = m.conn.Close()
 		_ = m.client.Close()
 	}
 
-	conn, err := ssh.Dial("tcp", dst, config)
+	var conn *ssh.Client
+	for _, algos := range candidates {
+		config.HostKeyAlgorithms = algos
+		conn, err = ssh.Dial("tcp", dst, config)
+		if err == nil {
+			if pinned != "" && !insecure && pinnedHostKeyAlgorithms(pinned) == nil {
+				m.pinAlgos = algos
+			}
+			break
+		}
+	}
 	if err != nil {
 		return err
 	}
