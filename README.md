@@ -1,9 +1,9 @@
 # Shuttle
-**Version 1.13**
+**Version 1.14**
 
 This project has been migrated from [ELN_file_watcher](https://github.com/ComPlat/ELN_file_watcher).
 
-Shuttle is a utility that facilitates seamless file transfer from a source device to a target location, specifically for Chemotion. It automates the movement of files from a specified source directory to a destination server using WebDAV or SFTP.
+Shuttle is a utility that facilitates seamless file transfer from a source device to a target location, specifically for Chemotion. It automates the movement of files from a specified source directory to a destination server using WebDAV or SFTP, or hands them to a ChemAssistentManager job (HTTP upload).
 
 ---
 
@@ -40,7 +40,7 @@ Shuttle is a utility that facilitates seamless file transfer from a source devic
 To run the utility, execute the following command:
 
 ```shell
-shuttle -src < source_directory_path > -duration < time_in_seconds > -dst < destination_server > -user < username > -pass < password > -type < file|folder|zip|tar|flat_tar > -transfer < webdav|sftp > -commonRegex < Regexp > [-crt < cert.pem >] [-hostkey < fingerprint >] [-insecure 1]
+shuttle -src < source_directory_path > -duration < time_in_seconds > -dst < destination_server > -user < username > -pass < password > -type < file|folder|zip|tar|flat_tar > -transfer < webdav|sftp|chemassistent > -commonRegex < Regexp > [-crt < cert.pem >] [-hostkey < fingerprint >] [-insecure 1]
 ```
 
 ### Parameters:
@@ -64,6 +64,23 @@ If using flat_tar, provide a regular expression (< Regexp >) to group related fi
 Transfer Protocol (-transfer):
 - webdav: Use WebDAV protocol.
 - sftp: Use SFTP protocol.
+- chemassistent: Upload to a [ChemAssistentManager](https://github.com/ComPlat) job (see below).
+
+### Transfer type `chemassistent` (ChemAssistentManager)
+
+Shuttle sends each file (or each folder) to a ChemAssistentManager job by HTTP POST; every upload starts **one run** of the job's AI agent, which gets the files as input.
+
+1. In ChemAssistentManager create a job with the trigger **"HTTP file upload (API key)"** and create an **API key** for it (it is shown only once).
+2. Start Shuttle with `-transfer chemassistent -dst https://<server> -pass <API key>` (`-user` is ignored). `/api/jobs/trigger` is appended to `-dst` when it has no path; a full trigger URL works too.
+
+- `-type file` / `flat_tar`: one run per file. `-type zip` / `tar`: one run per archive. `-type folder`: **one run per folder** with all its files; folder paths are flattened into the file names (`RunA/B/x.csv` → `RunA__B__x.csv`), because the server keeps only file names.
+- Each run gets the message `Shuttle <name>: <path>`, so the AI knows where the data came from.
+- A file is removed locally only when the server confirms it (`202`). A revoked key, a disabled job or a too large upload keeps the files and logs the server's answer; they are sent once the problem is fixed (new key → rebuild/restart Shuttle).
+- `-maxUpload <MB>` (default 100, like the server's `JOB_MAX_UPLOAD_MB`): larger uploads are not attempted and stay local.
+- TLS, `-crt` and `-insecure` work as for WebDAV. Windows XP builds speak at most TLS 1.2.
+- `-preconvert` is not supported with this transfer type.
+- If the connection breaks after the server stored a file but before Shuttle got the answer, the retry starts a second run.
+- The API key is never written to the log.
 
 Further options: `-name` (instance name, used for the working folder `~/shuttle/shuttle_<name>`), `-crt`, `-hostkey`, `-insecure` (see *Security*), and `-preconvert 1` with `-dstConverter`, `-userConverter`, `-passConverter` and `-public` to convert files with `ChemConverterApp` and send the converted files to a second destination.
 
@@ -127,6 +144,9 @@ Before running Shuttle, configure the following:
 - Transfer type and protocol.
 
 ## Changelog
+
+### 1.14
+- New transfer type **`chemassistent`**: upload files to a ChemAssistentManager job (HTTP POST with API key); one upload = one AI run, folders as one run. New flag `-maxUpload`.
 
 ### 1.13
 - **No lost or duplicated uploads:** a local file is deleted only after a confirmed upload (WebDAV errors used to count as success); every zip/tar is uploaded once (was twice); files are handed over to the uploader atomically; flat_tar no longer deletes sources before a successful copy.
