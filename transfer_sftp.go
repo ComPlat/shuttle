@@ -78,10 +78,7 @@ func (m *TransferManagerSftp) connect_to_server() error {
 		candidates = hostKeyAlgoGroups
 	}
 
-	if m.conn != nil {
-		_ = m.conn.Close()
-		_ = m.client.Close()
-	}
+	m.reset()
 
 	var conn *ssh.Client
 	for _, algos := range candidates {
@@ -112,20 +109,20 @@ func (m *TransferManagerSftp) connect_to_server() error {
 	return nil
 }
 
-// send_file uploads localPath to <dst path>/<remoteRel>.
+// reset closes and forgets the connection; the next send_file reconnects.
+func (m *TransferManagerSftp) reset() {
+	if m.client != nil {
+		_ = m.client.Close()
+	}
+	if m.conn != nil {
+		_ = m.conn.Close()
+	}
+	m.client, m.conn = nil, nil
+}
+
+// send_file uploads localPath to <dst path>/<remoteRel>. The connection is
+// reused; it is dropped after any error on the remote side.
 func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, error) {
-	if err := m.connect_to_server(); err != nil {
-		return false, err
-	}
-	remote := path.Join(m.dst.Path, remoteRel)
-	InfoLogger.Println("Sending...", remote)
-
-	if dir := path.Dir(remote); dir != "." {
-		if err := m.client.MkdirAll(dir); err != nil {
-			return false, err
-		}
-	}
-
 	srcFile, err := os.Open(localPath)
 	if err != nil {
 		return false, err
@@ -134,6 +131,27 @@ func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, erro
 	info, err := srcFile.Stat()
 	if err != nil {
 		return false, err
+	}
+	if m.client == nil {
+		if err := m.connect_to_server(); err != nil {
+			return false, err
+		}
+	}
+	ok, err := m.upload(srcFile, info.Size(), remoteRel)
+	if !ok {
+		m.reset()
+	}
+	return ok, err
+}
+
+func (m *TransferManagerSftp) upload(srcFile *os.File, size int64, remoteRel string) (bool, error) {
+	remote := path.Join(m.dst.Path, remoteRel)
+	InfoLogger.Println("Sending...", remote)
+
+	if dir := path.Dir(remote); dir != "." {
+		if err := m.client.MkdirAll(dir); err != nil {
+			return false, err
+		}
 	}
 
 	dstFile, err := m.client.OpenFile(remote, (os.O_WRONLY | os.O_CREATE | os.O_TRUNC))
@@ -147,11 +165,11 @@ func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, erro
 		}
 	}()
 
-	if _, err = io.Copy(dstFile, srcFile); err != nil {
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
 		return false, err
 	}
 	closed = true
-	if err = dstFile.Close(); err != nil {
+	if err := dstFile.Close(); err != nil {
 		return false, err
 	}
 
@@ -159,8 +177,8 @@ func (m *TransferManagerSftp) send_file(localPath, remoteRel string) (bool, erro
 	if err != nil {
 		return false, err
 	}
-	if remoteInfo.Size() != info.Size() {
-		return false, fmt.Errorf("size mismatch for %s: local %d, remote %d", remote, info.Size(), remoteInfo.Size())
+	if remoteInfo.Size() != size {
+		return false, fmt.Errorf("size mismatch for %s: local %d, remote %d", remote, size, remoteInfo.Size())
 	}
 	return true, nil
 }

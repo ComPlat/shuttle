@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -242,5 +243,24 @@ func TestBackoffDelay(t *testing.T) {
 	}
 	if got := backoffDelay(1, 500*time.Millisecond); got != 500*time.Millisecond {
 		t.Errorf("cap below 1s = %v", got)
+	}
+}
+
+func TestTransferCycleManyFilesNoPause(t *testing.T) {
+	_, cleanup := useTempGlobals(t)
+	defer cleanup()
+	for i := 0; i < 100; i++ {
+		writeTestFile(t, filepath.Join(TempPath, fmt.Sprintf("f%03d.txt", i)), "x")
+	}
+	f := &fakeTransfer{}
+	start := time.Now()
+	if n := transferCycle(f, TempPath, "file", 0); n != 0 {
+		t.Fatalf("failures = %d", n)
+	}
+	if len(f.calls) != 100 {
+		t.Fatalf("calls = %d, want 100", len(f.calls))
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("100 files took %v", d)
 	}
 }
