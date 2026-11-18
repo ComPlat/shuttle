@@ -125,7 +125,7 @@ A local file is only deleted from Shuttle's working folders after its upload has
 
 ### Security: certificates and host keys
 
-**WebDAV (TLS).** Shuttle verifies the server certificate, using the system root certificates plus the optional `-crt` file (PEM). A missing or unreadable `-crt` file is logged as a warning. A server with a **self-signed certificate** needs `-crt` pointing to that certificate (or its CA); otherwise uploads fail until it is set. Files wait in Shuttle's working folders and are sent once the connection works. **Windows XP:** the XP build cannot read the Windows certificate store, so it verifies only when `-crt` is given; without `-crt` it does not verify and logs a warning at start.
+**WebDAV (TLS).** Shuttle verifies the server certificate, using the system root certificates plus the optional `-crt` file (PEM). A missing or unreadable `-crt` file is logged as a warning. A server with a **self-signed certificate** needs `-crt` pointing to that certificate (or its CA); otherwise uploads fail until it is set. A relative `-crt` path (e.g. `-crt server.crt`) is looked up **next to the executable** first, then in the working directory, so the start files work without setting a working directory. Files wait in Shuttle's working folders and are sent once the connection works. **Windows XP:** the XP build cannot read the Windows certificate store, so it verifies only when `-crt` is given; without `-crt` it does not verify and logs a warning at start.
 
 **SFTP (SSH host key).**
 - `-hostkey "<fingerprint>"` pins the server's key. Accepted forms: `SHA256:...`, WinSCP style `ssh-ed25519 255 SHA256:...`, or MD5 `aa:bb:...`. Any of the server's key types can be pinned.

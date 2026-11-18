@@ -138,7 +138,7 @@ func newTransport(cfg *tls.Config) *http.Transport {
 }
 
 func initArgs() {
-	cfg, warnings := buildTLSConfig(unsetPlaceholder(args.crt), args.insecure, legacyTLSRoots, x509.SystemCertPool)
+	cfg, warnings := buildTLSConfig(resolveCrtPath(unsetPlaceholder(args.crt), executableDir()), args.insecure, legacyTLSRoots, x509.SystemCertPool)
 	for _, w := range warnings {
 		ErrorLogger.Println("WARNING: " + w)
 	}
