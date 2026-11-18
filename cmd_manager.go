@@ -31,7 +31,20 @@ type Args struct {
 	insecure bool
 	// version is set by -version; no other field is valid then.
 	version bool
+	// maxUploadMB limits one ChemAssistentManager upload request (-maxUpload);
+	// 0 means the default, chemAssistentDefaultMaxMB.
+	maxUploadMB int64
 }
+
+// transferChemAssistent is the -transfer value for uploads to a
+// ChemAssistentManager job (POST <dst>/api/jobs/trigger, Bearer token in -pass).
+const transferChemAssistent = "chemassistent"
+
+// chemAssistentDefaultMaxMB matches the server default JOB_MAX_UPLOAD_MB.
+const chemAssistentDefaultMaxMB = 100
+
+// chemAssistentTriggerPath is appended to a -dst that has no path.
+const chemAssistentTriggerPath = "/api/jobs/trigger"
 
 func (m Args) LogString() string {
 	commonRegexStr := ""
