@@ -66,3 +66,18 @@ func TestPrepareDoWorkRetriesWithoutNewItems(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 	}
 }
+
+// After a failed copy the entries are still in PreTempPath (not IncomingPath);
+// the periodic retry must hand them over too.
+func TestRetryPendingHandOverFromPreTemp(t *testing.T) {
+	_, restore := useTempGlobals(t)
+	defer restore()
+
+	writeTestFile(t, filepath.Join(PreTempPath, "C", "c.txt"), "c")
+
+	m := newPrepareManager(&Args{duration: time.Second}, make(chan string))
+	m.retryPendingHandOver()
+	if _, err := os.Stat(filepath.Join(TempPath, "C", "c.txt")); err != nil {
+		t.Errorf("entry left in PreTempPath was not handed over: %v", err)
+	}
+}

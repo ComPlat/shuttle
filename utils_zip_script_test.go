@@ -250,3 +250,20 @@ func TestIsRunnableScriptSymlink(t *testing.T) {
 		t.Error("a dangling link must be skipped")
 	}
 }
+
+func TestZipFolderStreamsLargeFile(t *testing.T) {
+	dir, cleanup := newTempDir(t)
+	defer cleanup()
+	src := filepath.Join(dir, "big")
+	data := strings.Repeat("0123456789abcdef", 256*1024) // 4 MB
+	writeTestFile(t, filepath.Join(src, "sub", "big.bin"), data)
+	writeTestFile(t, filepath.Join(src, "small.txt"), "s")
+	out, err := zipFolder(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := readZipEntries(t, out)
+	if got["sub/big.bin"] != data || got["small.txt"] != "s" || len(got) != 2 {
+		t.Errorf("unexpected archive entries: %d", len(got))
+	}
+}

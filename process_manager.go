@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -41,7 +40,8 @@ func (m ProcessManager) applyRegex(name string) ([]string, string) {
 func (m ProcessManager) collectTarPrefixes() {
 	entries, err := ReadDirCompat(FlatTarTempPath)
 	if err != nil {
-		log.Fatal(err)
+		ErrorLogger.Println(err)
+		return
 	}
 	for prefix := range m.doneFlatPrefixes {
 		delete(m.doneFlatPrefixes, prefix)
@@ -59,7 +59,8 @@ func (m ProcessManager) collectTarPrefixes() {
 func (m ProcessManager) processTarPrefixes() {
 	entries, err := ReadDirCompat(FlatTarTempPath)
 	if err != nil {
-		log.Fatal(err)
+		ErrorLogger.Println(err)
+		return
 	}
 
 	for hashPrefix, groups := range m.doneFlatPrefixes {

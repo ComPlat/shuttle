@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -51,13 +50,20 @@ func (m *PrepareManager) retryInterval() time.Duration {
 // works on an older entry with the same name; without this retry it would
 // only be retried when the next item arrives, which may never happen.
 func (m *PrepareManager) retryPendingHandOver() {
-	pending, err := ReadDirCompat(IncomingPath)
-	if err != nil || len(pending) == 0 {
+	// Entries wait in IncomingPath (rename blocked) or, after a failed
+	// copy, still in PreTempPath; both must be retried without a new item.
+	if !hasEntries(IncomingPath) && !hasEntries(PreTempPath) {
 		return
 	}
 	if err := CopyTempDirectory(); err != nil {
-		ErrorLogger.Println(err)
+		ErrorLogger.Println("hand-over failed, will retry:", err)
 	}
+}
+
+// hasEntries reports whether dir exists and is not empty.
+func hasEntries(dir string) bool {
+	entries, err := ReadDirCompat(dir)
+	return err == nil && len(entries) > 0
 }
 
 // prepareOne copies one finished item into PreTempPath, runs the scripts
@@ -84,22 +90,25 @@ func (m *PrepareManager) prepareOne(toSend string) error {
 	}
 
 	RunPreScripts(tempPath)
-	if args.preconvert {
-		RunConverterScripts(tempPath)
-		filePath := tempPath + ".zip"
-		fileName := filepath.Base(filePath)
-		err := AddLinkToZip(filepath.Base(filePath), filePath)
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-		err = os.Rename(filePath, filepath.Join(TempConvertedPath, fileName))
-		if err != nil {
-			ErrorLogger.Println(err)
+	if m.args.preconvert {
+		if cerr := RunConverterScripts(tempPath); cerr != nil {
+			// Skip the conversion steps only; the raw data is still handed over.
+			ErrorLogger.Println("conversion skipped:", cerr)
+		} else {
+			filePath := tempPath + ".zip"
+			fileName := filepath.Base(filePath)
+			if err := AddLinkToZip(filepath.Base(filePath), filePath); err != nil {
+				ErrorLogger.Println(err)
+			}
+			if err := os.Rename(filePath, filepath.Join(TempConvertedPath, fileName)); err != nil {
+				ErrorLogger.Println(err)
+			}
 		}
 	}
-	err = CopyTempDirectory()
-	if err != nil {
-		log.Fatal(err)
+	// On error the entries stay in PreTempPath/IncomingPath for the periodic retry.
+	if err = CopyTempDirectory(); err != nil {
+		ErrorLogger.Println("hand-over failed, will retry:", err)
+		return err
 	}
 	return nil
 }

@@ -1,14 +1,19 @@
 package main
 
 import (
+	"crypto/tls"
 	"crypto/x509"
+	"fmt"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"os/user"
 	"path/filepath"
 	"runtime"
+	"syscall"
 	"time"
 )
 
@@ -70,13 +75,25 @@ func setupPaths(home, name string) {
 	LogPath = filepath.Join(shuttleFolderName, "shuttle_log.txt")
 }
 
-// init initializes the logger and parses CMD args.
+// shuttleVersion is the program version, logged at startup and printed by -version.
+const shuttleVersion = "1.13"
+
+// initTool parses the CMD args, creates the working folders and the loggers.
+// The loggers exist (on stdout) before anything can fail; the log file is
+// added once its folder exists.
 func initTool() {
+	InfoLogger = log.New(os.Stdout, "-> INFO: ", log.Ldate|log.Ltime)
+	ErrorLogger = log.New(os.Stdout, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
+
 	args = GetCmdArgs()
+	if args.version {
+		fmt.Println("Shuttle " + shuttleVersion)
+		os.Exit(0)
+	}
 
 	usr, err := user.Current()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("cannot determine the home directory: %v", err)
 	}
 	setupPaths(usr.HomeDir, args.name)
 
@@ -89,21 +106,35 @@ func initTool() {
 	}
 	for _, newPath := range newPaths {
 		if err := os.MkdirAll(newPath, os.ModePerm); err != nil {
-			ErrorLogger.Println(err)
-			panic("")
+			log.Fatalf("cannot create folder %s: %v", newPath, err)
 		}
 	}
 
 	logFile, err := os.OpenFile(LogPath, os.O_CREATE|os.O_APPEND|os.O_RDWR, 0666)
 	if err != nil {
-		panic(err)
+		log.Fatalf("cannot open log file %s: %v", LogPath, err)
 	}
 	mw := io.MultiWriter(os.Stdout, logFile)
 
 	InfoLogger = log.New(mw, "-> INFO: ", log.Ldate|log.Ltime)
 	ErrorLogger = log.New(mw, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile)
+}
 
-	// Read in the cert file
+// newTransport returns the HTTP transport for WebDAV. There is deliberately
+// no overall request timeout (it would cut off large uploads); the timeouts
+// apply to connecting, the TLS handshake and waiting for the response.
+func newTransport(cfg *tls.Config) *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		TLSClientConfig:       cfg,
+		TLSHandshakeTimeout:   30 * time.Second,
+		ResponseHeaderTimeout: 5 * time.Minute,
+		IdleConnTimeout:       90 * time.Second,
+	}
 }
 
 func initArgs() {
@@ -111,15 +142,26 @@ func initArgs() {
 	for _, w := range warnings {
 		ErrorLogger.Println("WARNING: " + w)
 	}
-	tr = &http.Transport{TLSClientConfig: cfg}
+	tr = newTransport(cfg)
+}
+
+// connectAtStartup tries one connection. A failure is not fatal: the
+// transfer cycle reconnects and retries with backoff.
+func connectAtStartup(label string, tm TransferManager) {
+	if err := tm.connect_to_server(); err != nil {
+		ErrorLogger.Printf("Error connecting to %s (will retry): %v", label, err)
+	}
 }
 
 // main starts the ELN file watcher. See README for more information.
 func main() {
 	initTool()
 	initArgs()
+	if err := startupChecks(&args); err != nil {
+		log.Fatalf("startup check failed: %v", err)
+	}
 	now := time.Now()
-	InfoLogger.Println("Starting at ", now.Format(time.RFC822))
+	InfoLogger.Println("Starting Shuttle", shuttleVersion, "at ", now.Format(time.RFC822))
 	defer (func() {
 		now := time.Now()
 		InfoLogger.Println("Done at ", now.Format(time.RFC822))
@@ -127,7 +169,7 @@ func main() {
 
 	// Chain as communication channel between the file watcher and the transfer manager
 	done_files := make(chan string, 20)
-	// For potential (not jet implemented quit conditions)
+	// Closed on SIGINT/SIGTERM: stops every worker.
 	quit := make(chan int)
 	InfoLogger.Print(args.LogString())
 	register := LoadSentRegister(RegisterPath)
@@ -143,22 +185,18 @@ func main() {
 	go prm.doWork(quit)
 
 	tm := newFileTransferManager(&args)
-	if err := tm.connect_to_server(); err != nil {
-		ErrorLogger.Println("Error connecting: ", err)
-		log.Fatal(err)
-	}
+	connectAtStartup("destination", tm)
 	go tm.doWork(quit)
 
 	if args.preconvert {
 		tmc := newConvertedTransferManager(&args)
-		if err := tmc.connect_to_server(); err != nil {
-			ErrorLogger.Println("Error connecting: ", err)
-			log.Fatal(err)
-		}
+		connectAtStartup("converter destination", tmc)
 		go tmc.doWork(quit)
 	}
 
-	for {
-		time.Sleep(args.duration * 20)
-	}
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	sig := <-sigs
+	InfoLogger.Println("Stopping (signal", sig, ")")
+	close(quit)
 }
