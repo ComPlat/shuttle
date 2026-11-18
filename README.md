@@ -1,5 +1,5 @@
 # Shuttle
-**Version 1.14**
+**Version 1.14.1**
 
 This project has been migrated from [ELN_file_watcher](https://github.com/ComPlat/ELN_file_watcher).
 
@@ -144,6 +144,9 @@ Before running Shuttle, configure the following:
 - Transfer type and protocol.
 
 ## Changelog
+
+### 1.14.1
+- A relative `-crt` path (e.g. `-crt server.crt`, as ShuttleBuilder sets it) is now found **next to the executable**, not only in the working directory. Self-signed WebDAV servers are verified again when Shuttle is started from the ShuttleBuilder start files.
 
 ### 1.14
 - New transfer type **`chemassistent`**: upload files to a ChemAssistentManager job (HTTP POST with API key); one upload = one AI run, folders as one run. New flag `-maxUpload`.
