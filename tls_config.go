@@ -3,6 +3,8 @@ package main
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"os"
+	"path/filepath"
 )
 
 // buildTLSConfig returns the TLS config for WebDAV and the warnings to log.
@@ -52,4 +54,30 @@ func buildTLSConfig(crtPath string, insecure, legacyRoots bool, systemPool func(
 		return &tls.Config{InsecureSkipVerify: true, RootCAs: pool}, warnings
 	}
 	return &tls.Config{InsecureSkipVerify: false, RootCAs: pool}, warnings
+}
+
+// resolveCrtPath returns the -crt file to read. An empty or absolute path is
+// returned unchanged. A relative path is looked up in exeDir (the folder of
+// the executable) first, because the start files (Windows .vbs, systemd unit)
+// don't set a working directory; if it isn't there, the path stays relative to
+// the working directory as before.
+func resolveCrtPath(p, exeDir string) string {
+	if p == "" || filepath.IsAbs(p) || exeDir == "" {
+		return p
+	}
+	candidate := filepath.Join(exeDir, p)
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return p
+}
+
+// executableDir returns the folder of the running executable, or "" if it
+// cannot be determined.
+func executableDir() string {
+	ex, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	return filepath.Dir(ex)
 }

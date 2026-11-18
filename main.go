@@ -76,7 +76,7 @@ func setupPaths(home, name string) {
 }
 
 // shuttleVersion is the program version, logged at startup and printed by -version.
-const shuttleVersion = "1.14"
+const shuttleVersion = "1.14.1"
 
 // initTool parses the CMD args, creates the working folders and the loggers.
 // The loggers exist (on stdout) before anything can fail; the log file is
@@ -138,7 +138,7 @@ func newTransport(cfg *tls.Config) *http.Transport {
 }
 
 func initArgs() {
-	cfg, warnings := buildTLSConfig(unsetPlaceholder(args.crt), args.insecure, legacyTLSRoots, x509.SystemCertPool)
+	cfg, warnings := buildTLSConfig(resolveCrtPath(unsetPlaceholder(args.crt), executableDir()), args.insecure, legacyTLSRoots, x509.SystemCertPool)
 	for _, w := range warnings {
 		ErrorLogger.Println("WARNING: " + w)
 	}

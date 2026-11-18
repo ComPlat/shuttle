@@ -222,3 +222,41 @@ func TestTLSSystemPoolError(t *testing.T) {
 		t.Errorf("legacy must not warn about the pool: %v", warns)
 	}
 }
+
+func TestResolveCrtPath(t *testing.T) {
+	exeDir, cleanup := newTempDir(t)
+	defer cleanup()
+	writeTestFile(t, filepath.Join(exeDir, "server.crt"), "x")
+	abs := filepath.Join(exeDir, "other.crt")
+
+	cases := []struct {
+		name, in, exeDir, want string
+	}{
+		{"empty", "", exeDir, ""},
+		{"absolute", abs, exeDir, abs},
+		{"relative next to exe", "server.crt", exeDir, filepath.Join(exeDir, "server.crt")},
+		{"relative not next to exe", "missing.crt", exeDir, "missing.crt"},
+		{"no exe dir", "server.crt", "", "server.crt"},
+	}
+	for _, c := range cases {
+		if got := resolveCrtPath(c.in, c.exeDir); got != c.want {
+			t.Errorf("%s: resolveCrtPath(%q, %q) = %q, want %q", c.name, c.in, c.exeDir, got, c.want)
+		}
+	}
+}
+
+func TestResolveCrtPathVerifiesServerWithCertNextToExecutable(t *testing.T) {
+	srv := newTLSTestServer()
+	defer srv.Close()
+	exeDir, cleanup := newTempDir(t)
+	defer cleanup()
+	writeServerCrt(t, exeDir, srv) // writes exeDir/server.crt
+
+	cfg, warnings := buildTLSConfig(resolveCrtPath("server.crt", exeDir), false, false, emptyPool)
+	if len(warnings) != 0 {
+		t.Fatalf("expected no warnings for a certificate next to the executable, got %v", warnings)
+	}
+	if err := tlsGet(func() *http.Transport { return newTransport(cfg) }, srv.URL); err != nil {
+		t.Fatalf("server with the certificate next to the executable must verify: %v", err)
+	}
+}

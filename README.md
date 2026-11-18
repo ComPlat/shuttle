@@ -1,5 +1,5 @@
 # Shuttle
-**Version 1.14**
+**Version 1.14.1**
 
 This project has been migrated from [ELN_file_watcher](https://github.com/ComPlat/ELN_file_watcher).
 
@@ -125,7 +125,7 @@ A local file is only deleted from Shuttle's working folders after its upload has
 
 ### Security: certificates and host keys
 
-**WebDAV (TLS).** Shuttle verifies the server certificate, using the system root certificates plus the optional `-crt` file (PEM). A missing or unreadable `-crt` file is logged as a warning. A server with a **self-signed certificate** needs `-crt` pointing to that certificate (or its CA); otherwise uploads fail until it is set. Files wait in Shuttle's working folders and are sent once the connection works. **Windows XP:** the XP build cannot read the Windows certificate store, so it verifies only when `-crt` is given; without `-crt` it does not verify and logs a warning at start.
+**WebDAV (TLS).** Shuttle verifies the server certificate, using the system root certificates plus the optional `-crt` file (PEM). A missing or unreadable `-crt` file is logged as a warning. A server with a **self-signed certificate** needs `-crt` pointing to that certificate (or its CA); otherwise uploads fail until it is set. A relative `-crt` path (e.g. `-crt server.crt`) is looked up **next to the executable** first, then in the working directory, so the start files work without setting a working directory. Files wait in Shuttle's working folders and are sent once the connection works. **Windows XP:** the XP build cannot read the Windows certificate store, so it verifies only when `-crt` is given; without `-crt` it does not verify and logs a warning at start.
 
 **SFTP (SSH host key).**
 - `-hostkey "<fingerprint>"` pins the server's key. Accepted forms: `SHA256:...`, WinSCP style `ssh-ed25519 255 SHA256:...`, or MD5 `aa:bb:...`. Any of the server's key types can be pinned.
@@ -144,6 +144,9 @@ Before running Shuttle, configure the following:
 - Transfer type and protocol.
 
 ## Changelog
+
+### 1.14.1
+- A relative `-crt` path (e.g. `-crt server.crt`, as ShuttleBuilder sets it) is now found **next to the executable**, not only in the working directory. Self-signed WebDAV servers are verified again when Shuttle is started from the ShuttleBuilder start files.
 
 ### 1.14
 - New transfer type **`chemassistent`**: upload files to a ChemAssistentManager job (HTTP POST with API key); one upload = one AI run, folders as one run. New flag `-maxUpload`.
