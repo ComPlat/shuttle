@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"crypto/x509"
 	"io"
 	"log"
@@ -108,30 +107,11 @@ func initTool() {
 }
 
 func initArgs() {
-	isCert := len(args.crt) > 0
-
-	// Get the SystemCertPool, continue with an empty pool on error
-	rootCAs, _ := x509.SystemCertPool()
-	if rootCAs == nil {
-		rootCAs = x509.NewCertPool()
+	cfg, warnings := buildTLSConfig(unsetPlaceholder(args.crt), args.insecure, legacyTLSRoots, x509.SystemCertPool)
+	for _, w := range warnings {
+		ErrorLogger.Println("WARNING: " + w)
 	}
-	if isCert {
-		certs, err := ReadFileCompat(args.crt)
-		if err == nil {
-			if ok := rootCAs.AppendCertsFromPEM(certs); !ok {
-				ErrorLogger.Println("No certs appended, using system certs only")
-			}
-		}
-	}
-
-	// Trust the augmented cert pool in our client
-	config := &tls.Config{
-		InsecureSkipVerify: true,
-		RootCAs:            rootCAs,
-	}
-
-	tr = &http.Transport{TLSClientConfig: config}
-
+	tr = &http.Transport{TLSClientConfig: cfg}
 }
 
 // main starts the ELN file watcher. See README for more information.
