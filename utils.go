@@ -5,9 +5,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"compress/gzip"
+	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,7 +34,8 @@ func getRootDir(path string) string {
 func RunPreScripts(srcFilePath string) {
 	entries, err := ReadDirCompat(PreScriptPath)
 	if err != nil {
-		log.Fatal(err)
+		ErrorLogger.Println("cannot read the scripts folder, no pre-scripts run:", err)
+		return
 	}
 
 	for _, file := range entries {
@@ -73,23 +74,41 @@ func exeDir() (string, error) {
 	return filepath.Dir(exe), nil
 }
 
-func RunConverterScripts(srcFilePath string) {
-	entries, err := exeDir()
+// converterPath returns the path of the converter executable and checks
+// that it exists and is a regular file.
+func converterPath() (string, error) {
+	dir, err := exeDir()
 	if err != nil {
-		log.Fatal(err)
+		return "", err
 	}
-	file := ""
+	name := "ChemConverterApp"
 	if runtime.GOOS == "windows" {
-		file = filepath.Join(entries, "ChemConverterApp.exe")
-	} else {
-		file = filepath.Join(entries, "ChemConverterApp")
+		name = "ChemConverterApp.exe"
+	}
+	file := filepath.Join(dir, name)
+	info, err := os.Stat(file)
+	if err != nil {
+		return "", fmt.Errorf("converter executable does not exist: %s: %v", file, err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("converter is not a regular file: %s", file)
+	}
+	return file, nil
+}
+
+// RunConverterScripts runs the converter on srcFilePath. A missing converter
+// is returned as an error; it never stops the process.
+func RunConverterScripts(srcFilePath string) error {
+	file, err := converterPath()
+	if err != nil {
+		return err
 	}
 	fileInfo, err := os.Stat(file)
 	if err != nil {
-		log.Fatal("Error Converter executable dose not exists:\n |->", file, "\n", err)
+		return err
 	}
-	runScript(fileInfo, entries, "convert", "-i", srcFilePath, "-o", "jcampzip")
-
+	runScript(fileInfo, filepath.Dir(file), "convert", "-i", srcFilePath, "-o", "jcampzip")
+	return nil
 }
 
 func runScript(file os.FileInfo, cwd string, args ...string) {
@@ -261,17 +280,19 @@ func zipFolder(path_src string) (string, error) {
 				return err
 			}
 
-			dat, err := ReadFileCompat(path)
+			src, err := os.Open(path)
 			if err != nil {
 				return err
 			}
 
 			f, err := w.Create(filepath.ToSlash(rel_path))
-			if err != nil {
-				return err
+			if err == nil {
+				_, err = io.Copy(f, src)
 			}
-			_, err = f.Write([]byte(dat))
-
+			// Close each source before the next entry is opened.
+			if cerr := src.Close(); err == nil {
+				err = cerr
+			}
 			return err
 
 		})
