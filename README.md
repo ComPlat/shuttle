@@ -64,7 +64,7 @@ If using flat_tar, provide a regular expression (< Regexp >) to group related fi
 Transfer Protocol (-transfer):
 - webdav: Use WebDAV protocol.
 - sftp: Use SFTP protocol.
-- chemassistent: Upload to a [ChemAssistentManager](https://github.com/ComPlat) job (see below).
+- chemassistent: Upload to a ChemAssistentManager job (see below).
 
 ### Transfer type `chemassistent` (ChemAssistentManager)
 
