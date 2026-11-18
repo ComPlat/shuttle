@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"os"
 	"path/filepath"
 	"time"
@@ -84,22 +83,25 @@ func (m *PrepareManager) prepareOne(toSend string) error {
 	}
 
 	RunPreScripts(tempPath)
-	if args.preconvert {
-		RunConverterScripts(tempPath)
-		filePath := tempPath + ".zip"
-		fileName := filepath.Base(filePath)
-		err := AddLinkToZip(filepath.Base(filePath), filePath)
-		if err != nil {
-			ErrorLogger.Println(err)
-		}
-		err = os.Rename(filePath, filepath.Join(TempConvertedPath, fileName))
-		if err != nil {
-			ErrorLogger.Println(err)
+	if m.args.preconvert {
+		if cerr := RunConverterScripts(tempPath); cerr != nil {
+			// Skip the conversion steps only; the raw data is still handed over.
+			ErrorLogger.Println("conversion skipped:", cerr)
+		} else {
+			filePath := tempPath + ".zip"
+			fileName := filepath.Base(filePath)
+			if err := AddLinkToZip(filepath.Base(filePath), filePath); err != nil {
+				ErrorLogger.Println(err)
+			}
+			if err := os.Rename(filePath, filepath.Join(TempConvertedPath, fileName)); err != nil {
+				ErrorLogger.Println(err)
+			}
 		}
 	}
-	err = CopyTempDirectory()
-	if err != nil {
-		log.Fatal(err)
+	// On error the entries stay in PreTempPath/IncomingPath for the periodic retry.
+	if err = CopyTempDirectory(); err != nil {
+		ErrorLogger.Println("hand-over failed, will retry:", err)
+		return err
 	}
 	return nil
 }
