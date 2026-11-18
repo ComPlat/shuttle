@@ -30,6 +30,9 @@ var (
 	IncomingPath string
 	// RegisterPath is the JSON file of the sent register (WP 3.9).
 	RegisterPath string
+	// KnownHostsPath stores SSH host keys trusted on first use (WP 6.2),
+	// in OpenSSH known_hosts format.
+	KnownHostsPath string
 	// ArchivePath holds zip/tar archives built by the transfer managers,
 	// outside the folder they scan (WP 3.2).
 	ArchivePath string
@@ -63,6 +66,7 @@ func setupPaths(home, name string) {
 	ArchivePath = filepath.Join(shuttleFolderName, "shuttle_archive_temp")
 	FlatTarOutPath = filepath.Join(shuttleFolderName, "shuttle_flat_tar_out")
 	RegisterPath = filepath.Join(shuttleFolderName, "sent_register.json")
+	KnownHostsPath = filepath.Join(shuttleFolderName, "known_hosts")
 	PreScriptPath = filepath.Join(mainShuttleFolderName, "scripts")
 	LogPath = filepath.Join(shuttleFolderName, "shuttle_log.txt")
 }
