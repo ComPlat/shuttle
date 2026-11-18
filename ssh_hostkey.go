@@ -7,6 +7,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net"
@@ -137,4 +138,78 @@ func fingerprintMatches(pinned string, key ssh.PublicKey) bool {
 	}
 	md5 := strings.ToLower(strings.TrimPrefix(pinned, "MD5:"))
 	return md5 == strings.TrimPrefix(ssh.FingerprintLegacyMD5(key), "MD5:")
+}
+
+// knownHostKeyAlgorithms returns the host key algorithms matching the key
+// types already stored for hostname, or nil if none are known. The SSH client
+// must negotiate one of these: otherwise a server with several host keys
+// (ed25519, ecdsa, rsa) could present a different *type* than the one trusted
+// on first use, and that key would be refused as "changed" (OpenSSH restricts
+// its algorithms the same way).
+func knownHostKeyAlgorithms(path, hostname string) []string {
+	knownHostsMu.Lock()
+	defer knownHostsMu.Unlock()
+	if _, err := os.Stat(path); err != nil {
+		return nil
+	}
+	cb, err := knownhosts.New(path)
+	if err != nil {
+		return nil
+	}
+	// Probe with a key that is never stored: the KeyError lists every known
+	// key of the host.
+	probe, err := ssh.NewPublicKey(ed25519.NewKeyFromSeed(make([]byte, ed25519.SeedSize)).Public())
+	if err != nil {
+		return nil
+	}
+	keyErr, ok := cb(hostname, &net.TCPAddr{}, probe).(*knownhosts.KeyError)
+	if !ok {
+		return nil
+	}
+	var algos []string
+	seen := map[string]bool{}
+	add := func(a string) {
+		if !seen[a] {
+			seen[a] = true
+			algos = append(algos, a)
+		}
+	}
+	for _, k := range keyErr.Want {
+		switch t := k.Key.Type(); t {
+		case ssh.KeyAlgoRSA:
+			add(ssh.KeyAlgoRSASHA512)
+			add(ssh.KeyAlgoRSASHA256)
+			add(ssh.KeyAlgoRSA)
+		default:
+			add(t)
+		}
+	}
+	return algos
+}
+
+// hostKeyAlgoGroups are the host key algorithm groups tried, one by one, when
+// a pinned fingerprint does not name its key type. A server has one key per
+// type and only presents the type negotiated in the handshake, so a pinned
+// ed25519 fingerprint can only match if ed25519 is negotiated.
+var hostKeyAlgoGroups = [][]string{
+	{ssh.KeyAlgoED25519},
+	{ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521},
+	{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA},
+}
+
+// pinnedHostKeyAlgorithms returns the algorithms for the key type named in a
+// pinned fingerprint (WinSCP form "ssh-ed25519 255 SHA256:..."), or nil if the
+// pin does not name a type (bare "SHA256:..." or MD5).
+func pinnedHostKeyAlgorithms(pinned string) []string {
+	for _, tok := range strings.Fields(pinned) {
+		switch tok {
+		case ssh.KeyAlgoED25519:
+			return []string{ssh.KeyAlgoED25519}
+		case ssh.KeyAlgoECDSA256, ssh.KeyAlgoECDSA384, ssh.KeyAlgoECDSA521:
+			return []string{tok}
+		case ssh.KeyAlgoRSA, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSASHA512:
+			return []string{ssh.KeyAlgoRSASHA512, ssh.KeyAlgoRSASHA256, ssh.KeyAlgoRSA}
+		}
+	}
+	return nil
 }
