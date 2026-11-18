@@ -10,7 +10,6 @@ package main
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"path"
 
@@ -39,12 +38,20 @@ func (m *TransferManagerSftp) doWork(quit chan int) {
 func (m *TransferManagerSftp) connect_to_server() error {
 	user := m.user
 	password := m.pass
+	pinned, insecure := "", false
+	if m.args != nil {
+		pinned, insecure = m.args.hostKey, m.args.insecure
+	}
+	hostKeyCb, err := hostKeyCallback(pinned, insecure, KnownHostsPath)
+	if err != nil {
+		return err
+	}
 	config := &ssh.ClientConfig{
 		User: user,
 		Auth: []ssh.AuthMethod{
 			ssh.Password(password),
 		},
-		HostKeyCallback: ssh.HostKeyCallback(func(hostname string, remote net.Addr, key ssh.PublicKey) error { return nil }),
+		HostKeyCallback: hostKeyCb,
 	}
 
 	dst := m.dst.Host

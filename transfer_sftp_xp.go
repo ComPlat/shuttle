@@ -20,7 +20,7 @@ import (
 // maxWinscpOutputTail is how much of WinSCP's output goes into an error.
 const maxWinscpOutputTail = 2048
 
-var hostKeyWarnOnce sync.Once
+var hostKeyWarnOnce, hostKeyInsecureOnce sync.Once
 
 // winscpPath returns the WinSCP.com next to the executable.
 func winscpPath() (string, error) {
@@ -92,7 +92,12 @@ func (m *TransferManagerSftp) session() winscpSession {
 	if m.args != nil {
 		hostKey = m.args.hostKey
 	}
-	if hostKey == "" {
+	if m.args != nil && m.args.insecure {
+		hostKey = "*"
+		hostKeyInsecureOnce.Do(func() {
+			ErrorLogger.Println("SSH host key verification is DISABLED (-insecure)")
+		})
+	} else if hostKey == "" {
 		hostKeyWarnOnce.Do(func() {
 			InfoLogger.Println("no -hostkey given; WinSCP must already know the server's host key (accept it once in WinSCP), otherwise every upload fails")
 		})
