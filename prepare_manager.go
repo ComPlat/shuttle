@@ -50,13 +50,20 @@ func (m *PrepareManager) retryInterval() time.Duration {
 // works on an older entry with the same name; without this retry it would
 // only be retried when the next item arrives, which may never happen.
 func (m *PrepareManager) retryPendingHandOver() {
-	pending, err := ReadDirCompat(IncomingPath)
-	if err != nil || len(pending) == 0 {
+	// Entries wait in IncomingPath (rename blocked) or, after a failed
+	// copy, still in PreTempPath; both must be retried without a new item.
+	if !hasEntries(IncomingPath) && !hasEntries(PreTempPath) {
 		return
 	}
 	if err := CopyTempDirectory(); err != nil {
-		ErrorLogger.Println(err)
+		ErrorLogger.Println("hand-over failed, will retry:", err)
 	}
+}
+
+// hasEntries reports whether dir exists and is not empty.
+func hasEntries(dir string) bool {
+	entries, err := ReadDirCompat(dir)
+	return err == nil && len(entries) > 0
 }
 
 // prepareOne copies one finished item into PreTempPath, runs the scripts
