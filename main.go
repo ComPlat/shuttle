@@ -76,7 +76,7 @@ func setupPaths(home, name string) {
 }
 
 // shuttleVersion is the program version, logged at startup and printed by -version.
-const shuttleVersion = "1.14.1"
+const shuttleVersion = "1.14.2"
 
 // initTool parses the CMD args, creates the working folders and the loggers.
 // The loggers exist (on stdout) before anything can fail; the log file is

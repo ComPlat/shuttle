@@ -1,5 +1,5 @@
 # Shuttle
-**Version 1.14.1**
+**Version 1.14.2**
 
 This project has been migrated from [ELN_file_watcher](https://github.com/ComPlat/ELN_file_watcher).
 
@@ -144,6 +144,9 @@ Before running Shuttle, configure the following:
 - Transfer type and protocol.
 
 ## Changelog
+
+### 1.14.2
+- Updated SSH library: `golang.org/x/crypto` v0.59.0 (was v0.48.0; fixes the known SSH vulnerabilities), with `golang.org/x/sys` v0.50.0 and `github.com/pkg/sftp` v1.13.12. Requires Go 1.26 to build (`go.mod`); the Windows XP build is unchanged.
 
 ### 1.14.1
 - A relative `-crt` path (e.g. `-crt server.crt`, as ShuttleBuilder sets it) is now found **next to the executable**, not only in the working directory. Self-signed WebDAV servers are verified again when Shuttle is started from the ShuttleBuilder start files.
